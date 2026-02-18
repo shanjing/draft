@@ -1,0 +1,7 @@
+# Tracked source repos for draft. Each key is the subdirectory name in this repo;
+# source is the path to the repo (relative to draft root or absolute).
+# When adding a repo: add an entry here, then run the extract steps in CLAUDE.md.
+
+repos:
+  MarginCall:
+    source: ../MarginCall

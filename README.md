@@ -13,8 +13,9 @@ Each source repo has its own subdirectory. Only `.md` files are mirrored, preser
   - `docs/` — design and how-to docs
   - `tests/README.md`, `tools/cache/README.md`
 
+**Tracked repos** are listed in **`repos.yaml`** (subdirectory name → `source` path).
+
 ## Adding another repo
 
-1. Create a subdirectory named after the repo (e.g. `OtherRepo/`).
-2. Copy only the `.md` files you want to keep private, preserving paths (e.g. `OtherRepo/docs/foo.md`).
-3. Do not copy: top-level `README.md`, `CLAUDE.md`, or anything under `.claude` or `.cursor`.
+1. Add an entry to **`repos.yaml`** (e.g. `OtherRepo: { source: ../OtherRepo }`).
+2. Create a subdirectory named after the repo and copy only the `.md` files you want to keep private, preserving paths (see `CLAUDE.md` for full rules and exclusions).
