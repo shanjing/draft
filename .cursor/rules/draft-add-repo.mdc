@@ -1,49 +1,32 @@
 ---
-description: How to extract .md files from a source repo and add a new subdirectory to draft
+description: How to add a repo to draft, repos.yaml format, and scripts/pull.py options
 alwaysApply: true
 ---
 
-# Adding a New Repo to draft
+# draft repo: layout and tooling
 
-Tracked repos are listed in **`repos.yaml`** (key = subdirectory name, `source` = path to repo). When adding or mirroring docs from another repo:
+- **Tracked repos** are in **`repos.yaml`**: each key = subdirectory name; each value has `source` (path) and optional `url` (git origin). If the source is a git repo, `url` is added when using `pull.py -a` or on the next pull.
+- **Pull is pull-only:** `scripts/pull.py` copies from source into draft when newer; it does **not** delete files in draft when they are removed from the source.
+- **Setup:** `./setup.sh` creates `.venv`, installs deps, and installs the activation banner (figlet-style “Draft”, PWD, tracked repos).
 
-## 1. Register in repos.yaml
+# Adding a new repo
 
-- Add an entry under `repos` in **`repos.yaml`** with the repo’s subdirectory name and `source` path (e.g. `../OtherRepo`).
+**Preferred:** From draft root run `python3 scripts/pull.py -a REPO` where REPO is a repo name (e.g. `OtherRepo` → path `../OtherRepo`) or a path (e.g. `../OtherRepo`). The script updates `repos.yaml`, adds `url` if the path is a git repo, and runs pull.
 
-## 2. Create the subdirectory
+**Manual:** Add an entry to `repos.yaml` under `repos` (name → `source` path; `url` is optional and can be backfilled). Then run `python3 scripts/pull.py` or copy `.md` files manually with the same structure and exclusions.
 
-- Add one top-level subdirectory named **exactly like the key in repos.yaml** (e.g. `MarginCall`, `OtherRepo`).
-- Do not create any other top-level structure.
+# .md rules and exclusions
 
-## 3. Which .md files to include
+- Copy only **`.md`** files; preserve directory structure (e.g. `docs/foo.md` → `draft/<RepoName>/docs/foo.md`).
+- Create only directories that contain at least one copied `.md`.
+- **Exclude:** top-level `README.md`, `CLAUDE.md`, `.claude/`, `.cursor/`, `.pytest_cache/`, `.venv/`, `.git/`, `__pycache__/`, `.tmp/`, `.adk/`.
 
-- **Copy only `.md` files** from the source repo.
-- **Preserve directory structure**: path in draft must match path under the source repo (e.g. `source/docs/foo.md` → `draft/<RepoName>/docs/foo.md`).
-- **Create only directories that contain at least one copied `.md`**; do not create empty or extra directories.
+# scripts/pull.py options
 
-## 4. Exclusions (do not copy)
+- **Default:** Pull from all repos in `repos.yaml` (copy when source newer).
+- **`-v`** — Verbose: repo name, tree of tracked files (like `tree`), then status line.
+- **`-r DIRECTORY`** — List included `.md` files from a repo in tree format (any path).
+- **`-s`** — With `-r`, show first 3 lines of each file.
+- **`-a REPO`** — Add repo (name or path), update `repos.yaml`, add `url` if git repo, run pull.
 
-- Top-level **`README.md`** of the source repo (stays in the source only).
-- **`CLAUDE.md`** (anywhere).
-- Anything under **`.claude/`**.
-- Anything under **`.cursor/`**.
-- Tool/cache dirs that only have incidental .md (e.g. **`.pytest_cache/`**) — omit unless you explicitly want them.
-
-## 5. Steps to perform
-
-1. Add the repo to **`repos.yaml`** (name → `source` path).
-2. Read the source path from `repos.yaml` (or the path you added).
-3. List all `.md` files in the source repo (e.g. `find` or glob `**/*.md`), then remove paths matching the exclusions above.
-4. For each included path: create `draft/<RepoName>/<relative path>` dirs as needed; copy the file.
-5. Update the top-level **`README.md`** in draft: add a short bullet for the new repo.
-
-To stop tracking a repo: remove its entry from `repos.yaml` and optionally delete its subdirectory.
-
-## Example
-
-Source repo `../MarginCall` with `ENGINEERING.md`, `README.md`, `CLAUDE.md`, `docs/UI.md`, `.claude/commands/foo.md`:
-
-- Create `MarginCall/`, `MarginCall/docs/`.
-- Copy: `ENGINEERING.md` → `MarginCall/ENGINEERING.md`, `docs/UI.md` → `MarginCall/docs/UI.md`.
-- Do **not** copy: `README.md`, `CLAUDE.md`, `.claude/commands/foo.md`.
+To stop tracking: remove the repo from `repos.yaml` and optionally delete its subdirectory in draft.

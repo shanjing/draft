@@ -5,3 +5,7 @@
 repos:
   MarginCall:
     source: ../MarginCall
+    url: https://github.com/shanjing/MarginCall.git
+  adk-lab:
+    source: ../adk-lab
+    url: https://github.com/shanjing/adk-lab.git
