@@ -14,6 +14,10 @@ case "$OS" in
     ;;
 esac
 
+# Recreate .venv if requested (use after installing Python 3.12/3.11 to replace 3.14 venv)
+RECREATE_VENV=
+[ "${1:-}" = "--recreate" ] && RECREATE_VENV=1 && shift
+
 # Always show the draft banner first
 VIRTUAL_ENV="$SCRIPT_DIR/.venv" . "$SCRIPT_DIR/scripts/draft_banner.sh" 2>/dev/null || true
 
@@ -23,10 +27,37 @@ G='\033[0;32m'
 D='\033[0;90m'
 N='\033[0m'
 
-# --- First step: ensure .venv exists so pull.py (and deps) work during initial setup ---
+# Prefer Python 3.12 or 3.11 for ChromaDB/sentence-transformers (3.14 not supported)
+find_python() {
+  for py in python3.12 python3.11 python3; do
+    if command -v "$py" >/dev/null 2>&1; then
+      ver=$("$py" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
+      if [ -n "$ver" ]; then
+        # Prefer 3.11 or 3.12; allow 3.9+ for older systems
+        if printf '%s\n' "$ver" | grep -qE '^3\.(9|10|11|12)$'; then
+          echo "$py"
+          return
+        fi
+        if [ "$py" = "python3" ] && printf '%s\n' "$ver" | grep -qE '^3\.1[4-9]'; then
+          printf "${R}Warning: Python %s is not compatible with ChromaDB (Ask AI). Install Python 3.12 or 3.11 and re-run.${N}\n" "$ver" >&2
+        fi
+        [ "$py" = "python3" ] && echo "$py" && return
+      fi
+    fi
+  done
+  echo "python3"
+}
+
+if [ -n "$RECREATE_VENV" ] && [ -d "$SCRIPT_DIR/.venv" ]; then
+  printf "${D}Removing existing .venv (--recreate)${N}\n"
+  rm -rf "$SCRIPT_DIR/.venv"
+fi
+
+# --- First step: ensure .venv exists with a compatible Python ---
 if [ ! -d "$SCRIPT_DIR/.venv" ]; then
-  printf "${D}[1/2] Creating .venv${N}\n"
-  python3 -m venv "$SCRIPT_DIR/.venv"
+  PYEXE=$(find_python)
+  printf "${D}[1/2] Creating .venv with %s${N}\n" "$PYEXE"
+  "$PYEXE" -m venv "$SCRIPT_DIR/.venv"
   printf "  ${G}✓${N} .venv created\n"
   bash "$SCRIPT_DIR/scripts/install_venv_banner.sh" 2>/dev/null || true
   printf "${D}[2/2] Installing dependencies${N}\n"
@@ -226,6 +257,146 @@ check_venv() {
 printf "${D}--- Environment check ---${N}\n"
 printf "  %b\n" "$(check_venv && echo "${G}✓${N} .venv exists" || echo "${R}✗${N} .venv missing")"
 echo ""
+
+# Verify API keys (read-only endpoints). Return 0 if valid.
+verify_anthropic_key() {
+  local key="$1"
+  [ -z "$key" ] && return 1
+  key="$(printf '%s' "$key" | tr -d '\n\r')"
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X GET "https://api.anthropic.com/v1/models" -H "x-api-key: ${key}" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" 2>/dev/null)" = "200" ]
+}
+verify_gemini_key() {
+  local key="$1"
+  [ -z "$key" ] && return 1
+  key="$(printf '%s' "$key" | tr -d '\n\r')"
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://generativelanguage.googleapis.com/v1beta/models?key=${key}" 2>/dev/null)" = "200" ]
+}
+verify_openai_key() {
+  local key="$1"
+  [ -z "$key" ] && return 1
+  key="$(printf '%s' "$key" | tr -d '\n\r')"
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X GET "https://api.openai.com/v1/models" -H "Authorization: Bearer ${key}" 2>/dev/null)" = "200" ]
+}
+
+# --- Optional: Ask (AI) LLM configuration ---
+read -r -p "Configure Ask (AI) LLM? (y/n): " config_llm
+case "$config_llm" in
+  [yY]|[yY][eE][sS])
+    echo ""
+    env_file="$SCRIPT_DIR/.env"
+    llm_start=10
+    # Build Ollama list (indices 1..N) if available
+    OLLAMA_NAMES=()
+    if command -v ollama >/dev/null 2>&1; then
+      while IFS= read -r name; do
+        [ -n "$name" ] && OLLAMA_NAMES+=("$name")
+      done < <(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+      idx=1
+      for name in "${OLLAMA_NAMES[@]}"; do
+        printf "  ${G}%d.${N} %s (Ollama)\n" "$idx" "$name"
+        idx=$((idx + 1))
+      done
+      llm_start=$idx
+    else
+      printf "${D}(Ollama not installed — local models skipped)${N}\n"
+    fi
+    first_ollama=1
+    last_ollama=$((llm_start - 1))
+    # Cloud and Other (fixed indices 10, 11, 12, 13 — or next available)
+    printf "  ${G}%d.${N} Gemini 2.5 Flash (cloud)\n" "$llm_start"
+    num_gemini=$llm_start
+    num_opus=$((llm_start + 1))
+    num_openai=$((llm_start + 2))
+    num_other=$((llm_start + 3))
+    printf "  ${G}%d.${N} Opus / Claude (cloud)\n" "$num_opus"
+    printf "  ${G}%d.${N} OpenAI low (cloud)\n" "$num_openai"
+    printf "  ${G}%d.${N} Other (enter model string)\n" "$num_other"
+    echo ""
+    max_choice=$num_other
+
+    while true; do
+      read -r -p "Choose model (1-${max_choice}): " choice
+      choice="$(printf '%s' "$choice" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      if [ -z "$choice" ]; then
+        printf "${D}Skipped.${N}\n"
+        break
+      fi
+      if [ "$choice" -ge "$first_ollama" ] 2>/dev/null && [ "$choice" -le "$last_ollama" ] 2>/dev/null; then
+        # Ollama
+        i=$((choice - 1))
+        model_name="${OLLAMA_NAMES[i]:-}"
+        if [ -n "$model_name" ]; then
+          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode ollama --model "$model_name")
+          printf "  ${G}✓${N} Set .env: Ollama model %s\n" "$model_name"
+          break
+        fi
+        printf "  ${R}No model at that index.${N}\n"
+      elif [ "$choice" = "$num_gemini" ]; then
+        read -r -s -p "Enter Gemini API key: " api_key
+        echo ""
+        api_key="$(printf '%s' "$api_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        if [ -z "$api_key" ]; then
+          printf "${D}Skipped.${N}\n"
+          break
+        fi
+        printf "${D}Verifying...${N}\n"
+        if verify_gemini_key "$api_key"; then
+          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode gemini --model "gemini-2.5-flash" --api-key "$api_key")
+          printf "  ${G}✓${N} Key valid. .env updated for Gemini 2.5 Flash.\n"
+          break
+        else
+          printf "  ${R}Invalid key.${N}\n"
+        fi
+      elif [ "$choice" = "$num_opus" ]; then
+        read -r -s -p "Enter Anthropic API key: " api_key
+        echo ""
+        api_key="$(printf '%s' "$api_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        if [ -z "$api_key" ]; then
+          printf "${D}Skipped.${N}\n"
+          break
+        fi
+        printf "${D}Verifying...${N}\n"
+        if verify_anthropic_key "$api_key"; then
+          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode claude --model "claude-3-opus-20240229" --api-key "$api_key")
+          printf "  ${G}✓${N} Key valid. .env updated for Opus (Claude).\n"
+          break
+        else
+          printf "  ${R}Invalid key.${N}\n"
+        fi
+      elif [ "$choice" = "$num_openai" ]; then
+        read -r -s -p "Enter OpenAI API key: " api_key
+        echo ""
+        api_key="$(printf '%s' "$api_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        if [ -z "$api_key" ]; then
+          printf "${D}Skipped.${N}\n"
+          break
+        fi
+        printf "${D}Verifying...${N}\n"
+        if verify_openai_key "$api_key"; then
+          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode openai --model "gpt-4o-mini" --api-key "$api_key")
+          printf "  ${G}✓${N} Key valid. .env updated for OpenAI.\n"
+          break
+        else
+          printf "  ${R}Invalid key.${N}\n"
+        fi
+      elif [ "$choice" = "$num_other" ]; then
+        read -r -p "Enter model name (e.g. ollama model or provider:model): " other_model
+        other_model="$(printf '%s' "$other_model" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        if [ -z "$other_model" ]; then
+          printf "${D}Skipped.${N}\n"
+          break
+        fi
+        (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode ollama --model "$other_model")
+        printf "  ${G}✓${N} Set .env: custom model %s (Ollama).\n" "$other_model"
+        break
+      else
+        printf "  ${R}Enter a number 1-%s.${N}\n" "$max_choice"
+      fi
+    done
+    echo ""
+    ;;
+  *) ;;
+esac
 
 printf "${G}✓ .venv ready.${N}\n"
 bash "$SCRIPT_DIR/scripts/install_venv_banner.sh" 2>/dev/null || true

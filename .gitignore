@@ -4,6 +4,7 @@ Thumbs.db
 
 # Python
 .venv/
+.env
 
 # Cloned GitHub sources (setup.sh)
 .sources/
@@ -11,3 +12,6 @@ Thumbs.db
 # Editor
 *.swp
 *~
+.search_index
+.vector_store/
+.cache/

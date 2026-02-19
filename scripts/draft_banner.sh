@@ -45,7 +45,8 @@ if [ -f "$_SOURCES_YAML" ]; then
     }
   ' "$_SOURCES_YAML" 2>/dev/null | tr '\n' ',' | sed 's/,$//;s/,/, /g' || true)
   if [ -n "$_list" ]; then
-    printf '  Document tracking sources : [ %s ]\n' "$_list"
+    printf '  Document tracking sources :\n'
+    printf '  [ %s ]\n' "$_list"
   fi
 fi
 printf '\n'
