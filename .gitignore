@@ -5,6 +5,9 @@ Thumbs.db
 # Python
 .venv/
 
+# Cloned GitHub sources (setup.sh)
+.sources/
+
 # Editor
 *.swp
 *~
