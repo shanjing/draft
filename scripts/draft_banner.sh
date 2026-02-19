@@ -24,14 +24,30 @@ printf "${N}\n"
 # Current working directory (path only, no "CWD" label)
 printf '  %s\n' "${PWD:-$(pwd)}"
 
-# Tracked repos from repos.yaml (repo names only)
-_REPOS_YAML="${_DRAFT_PROJECT_ROOT}/repos.yaml"
-if [ -f "$_REPOS_YAML" ]; then
-  _repos=$(grep -E '^[[:space:]]{2,}[A-Za-z0-9_.-]+[[:space:]]*:[[:space:]]*$' "$_REPOS_YAML" 2>/dev/null | sed -E 's/^[[:space:]]+//;s/[[:space:]]*:[[:space:]]*$//' | grep -v -E '^(repos|source)$' || true)
-  if [ -n "$_repos" ]; then
-    printf '  %s\n' "tracking repos: $_repos"
+# Tracked sources from sources.yaml: [ github/name | local directory/name ]
+_SOURCES_YAML="${_DRAFT_PROJECT_ROOT}/sources.yaml"
+if [ -f "$_SOURCES_YAML" ]; then
+  _list=$(awk '
+    /^[[:space:]]{2,}[A-Za-z0-9_.-]+[[:space:]]*:[[:space:]]*$/ {
+      n = $1; gsub(/^[[:space:]]+|[[:space:]]*:[[:space:]]*$/, "", n);
+      if (n != "repos" && n != "source") name = n;
+      next;
+    }
+    /^[[:space:]]+source:[[:space:]]/ && name != "" {
+      path = $0; gsub(/^[[:space:]]+source:[[:space:]]*/, "", path);
+      if (path ~ /^https?:\/\/github\.com\/|^git@github\.com:/)
+        printf "github/%s", name;
+      else
+        printf "local directory/%s", name;
+      name = "";
+      printf "\n";
+      next;
+    }
+  ' "$_SOURCES_YAML" 2>/dev/null | tr '\n' ',' | sed 's/,$//;s/,/, /g' || true)
+  if [ -n "$_list" ]; then
+    printf '  Document tracking sources : [ %s ]\n' "$_list"
   fi
 fi
 printf '\n'
 
-unset _DRAFT_PROJECT_ROOT _REPOS_YAML _repos LB N
+unset _DRAFT_PROJECT_ROOT _SOURCES_YAML _list LB N

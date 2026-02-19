@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Draft — document index</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&icon_names=home,search,sync,unfold_less,unfold_more,push_pin,expand_more&display=block" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-left">
+      <button type="button" id="btn-home" class="btn btn-icon" title="Home"><span class="material-symbols-outlined" aria-hidden="true">home</span></button>
+      <h1>Draft</h1>
+      <p class="tagline"><span class="prompt">$</span> document index</p>
+    </div>
+    <div class="header-right search-wrap">
+      <input type="search" id="search-input" class="search-input hidden" placeholder="Search documents (full text)…" aria-label="Search documents">
+      <div id="search-results" class="search-results hidden" aria-live="polite"></div>
+      <button type="button" id="btn-search" class="btn btn-search" title="Search"><span class="material-symbols-outlined btn-search-icon" aria-hidden="true">search</span> Search</button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-toolbar">
+        <button type="button" id="btn-pull" class="btn btn-small btn-primary btn-icon-text" title="Pull latest from managed repos"><span class="toolbar-btn-icon" aria-hidden="true">↻</span> Pull</button>
+        <button type="button" id="btn-collapse" class="btn btn-small btn-icon-text" title="Collapse all folders"><span class="toolbar-btn-icon" aria-hidden="true">▼</span> Collapse</button>
+        <button type="button" id="btn-expand" class="btn btn-small btn-icon-text" title="Expand all folders"><span class="toolbar-btn-icon" aria-hidden="true">▶</span> Expand</button>
+      </div>
+      <div id="pull-status" class="pull-status hidden"></div>
+      <!-- System console (Matrix-style), under Pull button -->
+      <div id="system-console" class="system-console collapsed">
+        <div class="system-console-header" id="system-console-toggle">
+          <span class="system-console-pulse"></span>
+          <span>SYSTEM CONSOLE</span>
+          <span class="system-console-chevron"></span>
+        </div>
+        <div id="system-console-content" class="system-console-body"></div>
+      </div>
+      <div class="add-source">
+        <label for="add-source-input" class="add-source-label">Add source</label>
+        <input type="text" id="add-source-input" class="add-source-input" placeholder="GitHub URL or local path" aria-label="Add source (GitHub URL or local path)" autocomplete="off">
+      </div>
+      <nav id="tree" class="tree" aria-label="Document tree"></nav>
+    </aside>
+    <main class="content">
+      <div id="placeholder" class="placeholder">Select a document from the tree.</div>
+      <article id="doc" class="doc hidden"></article>
+      <div id="error" class="error hidden"></div>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

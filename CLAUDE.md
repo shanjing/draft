@@ -2,9 +2,15 @@
 
 This repo stores private documents (tech details, drafts) extracted from other repositories. Each source repo has its own top-level subdirectory; only `.md` files are mirrored, with the same directory structure.
 
-**Tracked repos** are listed in **`repos.yaml`**: each key is the subdirectory name in draft; each value has `source` (path to the repo) and optionally `url` (git origin URL). If the source path is a git repo, `url` is added automatically when adding with `scripts/pull.py -a` or on the next pull.
+**Tracked repos** are listed in **`sources.yaml`**: each key is the subdirectory name in draft; each value has `source` (path or GitHub URL) and optionally a single `url` (git origin URL). For local paths that are git repos, `url` is added automatically when using `scripts/pull.py -a` or on the next pull. Each repo block must have at most one `url` line (duplicates are normalized on pull).
+
+**Sources:** A source can be (1) a **local path** (e.g. `../OtherRepo`, `./MarginCall`), or (2) a **GitHub URL** (e.g. `https://github.com/owner/repo`). GitHub sources are fetched via the GitHub API (no clone); `.md` files are pulled with the same exclusions as local.
 
 **Tooling:** `scripts/pull.py` does pull-only updates (no purge). Run `./setup.sh` to create `.venv` and the activation banner (figlet-style “Draft”, PWD, tracked repos).
+
+---
+
+**Document UI:** Web UI (`ui/`, FastAPI + static frontend) serves the document tree, renders markdown, and supports Pull, Add source (GitHub URL or local path), full-text search (Whoosh), and pinning repos to the top. Full-text search uses an index under `.search_index/`, rebuilt automatically after each Pull (or via `POST /api/reindex`). Endpoints: `GET /api/tree`, `GET /api/doc/{repo}/{path}`, `GET /api/search?q=...`, `POST /api/pull`, `POST /api/add_source`, `POST /api/reindex`. Run with `python scripts/serve.py` or `uvicorn ui.app:app --host 0.0.0.0 --port 8058`.
 
 ---
 
@@ -18,11 +24,15 @@ From the draft repo root:
 python3 scripts/pull.py -a REPO
 ```
 
-- **REPO** = repo name (e.g. `OtherRepo`) → uses `../OtherRepo` as path, or a path (e.g. `../OtherRepo`, `./path/to/repo`). The script updates `repos.yaml`, adds `url` if the path is a git repo, and runs pull.
+- **REPO** can be:
+  - **Repo name** (e.g. `OtherRepo`) → uses `../OtherRepo` as path.
+  - **Path** (e.g. `../OtherRepo`, `./path/to/repo`) → resolved and name taken from the directory name.
+  - **GitHub URL** (e.g. `https://github.com/owner/repo`) → added as source; pull fetches `.md` via GitHub API (no clone). Subdirectory name is `owner_repo`.
+The script updates `sources.yaml`, adds `url` for local git repos (or uses the URL as source for GitHub), and runs pull.
 
 ## Option B: Manual steps
 
-### 1. Register in repos.yaml
+### 1. Register in sources.yaml
 
 - Add an entry under `repos` with the subdirectory name and `source` path (e.g. `../OtherRepo`). Optional `url` can be added by hand or will be backfilled on the next pull if the source is a git repo.
 
@@ -47,17 +57,17 @@ python3 scripts/pull.py -a REPO
 
 - Update the top-level **`README.md`** in draft: add a short bullet for the new repo (name, link if you have `url`, and what’s in it).
 
-To **stop tracking** a repo: remove its entry from `repos.yaml` and optionally delete its subdirectory in draft.
+To **stop tracking** a repo: remove its entry from `sources.yaml` and optionally delete its subdirectory in draft.
 
 ---
 
 # scripts/pull.py options
 
-- **No options:** Pull from all repos in `repos.yaml` (copy only when source is newer; never delete in draft).
+- **No options:** Pull from all repos in `sources.yaml` (copy only when source is newer; never delete in draft). GitHub sources are fetched via API.
 - **`-v`** — Verbose: show each repo name, tree of tracked files (like Linux `tree`), and status (up to date / N file(s) updated).
-- **`-r DIRECTORY`** — List included `.md` files from a repo in tree format (repo need not be in `repos.yaml`).
+- **`-r DIRECTORY`** — List included `.md` files from a repo in tree format (repo need not be in `sources.yaml`).
 - **`-s`** — With `-r`, show the first 3 lines of each file.
-- **`-a REPO`** — Add repo to `repos.yaml` (name or path), add `url` if git repo, then run pull.
+- **`-a REPO`** — Add repo to `sources.yaml`. REPO can be a repo name (→ `../name`), a path, or a GitHub URL (→ fetch via API). Adds `url` for local git repos; then runs pull.
 
 ---
 
