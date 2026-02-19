@@ -1,16 +1,26 @@
 """
 Draft UI: serve document tree and markdown content. Launch with uvicorn.
 """
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 DRAFT_ROOT = Path(__file__).resolve().parent.parent
+if str(DRAFT_ROOT) not in sys.path:
+    sys.path.insert(0, str(DRAFT_ROOT))
+
+# Load .env so DRAFT_LLM_* and OLLAMA_MODEL work regardless of how server is started
+try:
+    from dotenv import load_dotenv
+    load_dotenv(DRAFT_ROOT / ".env")
+except ImportError:
+    pass
 
 
 def _parse_repos_yaml(path: Path) -> dict:
@@ -104,6 +114,53 @@ def api_tree():
 def _search_module():
     from . import search_index
     return search_index
+
+
+def _ai_engine():
+    from lib import ai_engine
+    return ai_engine
+
+
+class AskBody(BaseModel):
+    query: str = ""
+
+
+@app.post("/api/ask")
+def api_ask(body: AskBody):
+    """Stream an AI answer over your docs via SSE. Requires AI index (run scripts/index_for_ai.py) and ANTHROPIC_API_KEY or Ollama."""
+    query = (body.query or "").strip()
+    if not query:
+        return {"error": "Missing query."}
+
+    def event_stream():
+        try:
+            engine = _ai_engine()
+            for kind, payload in engine.ask_stream(DRAFT_ROOT, query):
+                if kind == "text":
+                    yield f"data: {json.dumps({'type': 'text', 'text': payload})}\n\n"
+                elif kind == "citations":
+                    yield f"data: {json.dumps({'type': 'citations', 'citations': payload})}\n\n"
+                elif kind == "error":
+                    yield f"data: {json.dumps({'type': 'error', 'error': payload})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/reindex_ai")
+def api_reindex_ai():
+    """Rebuild the RAG vector index from draft docs (for the Ask feature)."""
+    try:
+        from lib.ingest import build_index
+        n = build_index(DRAFT_ROOT, verbose=False)
+        return {"ok": True, "indexed": n}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/api/search")

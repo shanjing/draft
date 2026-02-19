@@ -253,6 +253,48 @@
     }
   })();
 
+  (function initSidebarResize() {
+    var layout = document.getElementById('layout');
+    var handle = document.getElementById('sidebar-resize');
+    var sidebar = document.getElementById('sidebar');
+    if (!layout || !handle || !sidebar) return;
+    var SIDEBAR_WIDTH_KEY = 'draft-sidebar-width';
+    var MIN = 180;
+    var MAX = 1200;
+
+    function getWidth() {
+      var w = parseFloat(getComputedStyle(layout).getPropertyValue('--sidebar-width')) || 280;
+      return isNaN(w) ? 280 : w;
+    }
+    function setWidth(px) {
+      var w = Math.min(MAX, Math.max(MIN, px));
+      layout.style.setProperty('--sidebar-width', w + 'px');
+      try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w)); } catch (e) {}
+    }
+
+    var saved = null;
+    try { saved = localStorage.getItem(SIDEBAR_WIDTH_KEY); } catch (e) {}
+    if (saved != null) {
+      var n = parseFloat(saved);
+      if (!isNaN(n)) setWidth(n);
+    }
+
+    handle.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      var startX = e.clientX;
+      var startW = getWidth();
+      function move(ev) {
+        setWidth(startW + (ev.clientX - startX));
+      }
+      function up() {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+  })();
+
   function refreshTree() {
     fetch('/api/tree')
       .then(function (r) { return r.json(); })
@@ -433,6 +475,157 @@
         input.classList.add('hidden');
         input.blur();
       }
+    });
+  })();
+
+  (function setupAskAI() {
+    var askPanel = document.getElementById('ask-ai');
+    var askToggle = document.getElementById('ask-ai-toggle');
+    var queryInput = document.getElementById('ask-query-input');
+    var askSubmit = document.getElementById('ask-submit');
+    var answerEl = document.getElementById('ask-answer');
+    var citationsEl = document.getElementById('ask-citations');
+    var errorEl = document.getElementById('ask-error');
+    if (!askPanel || !askSubmit || !queryInput) return;
+
+    askToggle.addEventListener('click', function () {
+      askPanel.classList.toggle('collapsed');
+    });
+
+    var reindexBtn = document.getElementById('ask-reindex');
+    if (reindexBtn) {
+      reindexBtn.addEventListener('click', function () {
+        reindexBtn.disabled = true;
+        reindexBtn.textContent = 'Building…';
+        appendConsoleLine('$ reindex AI');
+        fetch('/api/reindex_ai', { method: 'POST' })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            reindexBtn.textContent = d.ok ? 'Rebuild AI index (' + (d.indexed || 0) + ' chunks)' : 'Rebuild AI index';
+            if (d.ok) appendConsoleLine('AI index built: ' + (d.indexed || 0) + ' chunks.');
+            if (!d.ok && d.error) {
+              showAskError(d.error);
+              appendConsoleLine('AI reindex failed: ' + (d.error || ''));
+            }
+          })
+          .catch(function (err) {
+            reindexBtn.textContent = 'Rebuild AI index';
+            appendConsoleLine('AI reindex failed: ' + (err.message || ''));
+          })
+          .then(function () { reindexBtn.disabled = false; });
+      });
+    }
+
+    function showAskError(msg) {
+      errorEl.textContent = msg || '';
+      errorEl.classList.toggle('hidden', !msg);
+    }
+
+    function appendChunkToBuffer(buf, chunk) {
+      var decoder = new TextDecoder();
+      return buf + decoder.decode(chunk, { stream: true });
+    }
+    function parseSSELines(buffer) {
+      var events = [];
+      var rest = buffer;
+      var idx;
+      while ((idx = rest.indexOf('\n\n')) !== -1) {
+        var block = rest.slice(0, idx);
+        rest = rest.slice(idx + 2);
+        var line = block.split('\n').find(function (l) { return l.startsWith('data: '); });
+        if (line) {
+          try {
+            events.push(JSON.parse(line.slice(6)));
+          } catch (e) {}
+        }
+      }
+      return { events: events, rest: rest };
+    }
+
+    askSubmit.addEventListener('click', function () {
+      var query = (queryInput.value || '').trim();
+      if (!query) return;
+      answerEl.classList.add('hidden');
+      answerEl.textContent = '';
+      citationsEl.classList.add('hidden');
+      citationsEl.innerHTML = '';
+      showAskError('');
+      answerEl.classList.remove('hidden');
+      answerEl.textContent = '…';
+      askSubmit.disabled = true;
+
+      appendConsoleLine('$ ask: ' + query);
+      appendConsoleLine('Streaming…');
+
+      fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: query })
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error('Ask failed');
+          return res.body.getReader();
+        })
+        .then(function (reader) {
+          var buffer = '';
+          var fullText = '';
+          function read() {
+            return reader.read().then(function (result) {
+              if (result.done) {
+                var parsed = parseSSELines(buffer);
+                parsed.events.forEach(handleEvent);
+                finish();
+                return;
+              }
+              buffer = appendChunkToBuffer(buffer, result.value);
+              var parsed = parseSSELines(buffer);
+              buffer = parsed.rest;
+              parsed.events.forEach(handleEvent);
+              return read();
+            });
+          }
+          function handleEvent(data) {
+            if (data.type === 'text' && data.text) {
+              fullText += data.text;
+              answerEl.textContent = fullText;
+            }
+            if (data.type === 'citations' && data.citations) {
+              citationsEl.innerHTML = data.citations.map(function (c, i) {
+                var num = i + 1;
+                var label = c.repo + '/' + c.path + (c.heading ? ' — ' + c.heading : '');
+                return num + '. <a href="#" data-repo="' + escapeAttr(c.repo) + '" data-path="' + escapeAttr(c.path) + '">' + escapeHtml(label) + '</a>';
+              }).join('');
+              citationsEl.classList.remove('hidden');
+              citationsEl.querySelectorAll('a').forEach(function (a) {
+                a.addEventListener('click', function (e) {
+                  e.preventDefault();
+                  loadDoc(a.dataset.repo, a.dataset.path);
+                });
+              });
+            }
+            if (data.type === 'error') {
+              showAskError(data.error || 'Error');
+              appendConsoleLine('Ask error: ' + (data.error || ''));
+            }
+          }
+          function finish() {
+            if (!answerEl.textContent || answerEl.textContent === '…') answerEl.textContent = '(No answer.)';
+            appendConsoleLine('Ask complete.');
+            askSubmit.disabled = false;
+          }
+          return read().catch(function (err) {
+            showAskError(err.message || 'Request failed.');
+            appendConsoleLine('Ask failed: ' + (err.message || ''));
+            answerEl.classList.add('hidden');
+            askSubmit.disabled = false;
+          });
+        })
+        .catch(function (err) {
+          showAskError(err.message || 'Request failed.');
+          appendConsoleLine('Ask failed: ' + (err.message || ''));
+          answerEl.classList.add('hidden');
+          askSubmit.disabled = false;
+        });
     });
   })();
 

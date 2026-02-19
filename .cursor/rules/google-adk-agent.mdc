@@ -1,0 +1,69 @@
+---
+description: Google ADK (Agent Development Kit) agent patterns, API, session state, and runtime. Use when working on or referencing ADK-based agents (e.g. MarginCall, adk-lab). Reference MarginCall docs in this repo for the "adk part."
+alwaysApply: false
+globs: ["**/MarginCall/**", "**/adk-lab/**", "**/google_adk-python/**", "**/*agent*", "**/*adk*"]
+---
+
+# Google ADK agent — concepts and patterns
+
+This rule summarizes how **Google Agent Development Kit (ADK)** works and how agent projects (e.g. **MarginCall**) use it. For full design and infrastructure details, use the mirrored docs in this repo: **MarginCall/** (e.g. `AGENTIC_ENGINEERING.md`, `ENGINEERING.md`, `docs/FrontendBackendMemo.md`, `docs/UI.md`, `docs/ObservabilityStrategy.md`).
+
+---
+
+## What ADK provides
+
+- **Agent runtime and HTTP API** — No business logic. ADK supplies the FastAPI app and routes that expose agents and sessions; the project adds agents, tools, and custom routes.
+- **Entry point:** `google.adk.cli.fast_api.get_fast_api_app(agents_dir=..., session_service_uri=..., ...)` returns a FastAPI app with:
+  - Session create/read (and other session endpoints)
+  - **POST /run** — run agent, return JSON array of events
+  - **POST /run_sse** — run agent, stream events as Server-Sent Events (`data: {event_json}\n\n`)
+- **Request body** (for `/run` and `/run_sse`) includes at least: `appName`, `userId`, `sessionId`, `newMessage` (e.g. `{ "role": "user", "parts": [{ "text": "..." }] }`). See ADK API Server Guide for full shape.
+- **Event shape:** Events have `invocationId`, `author` (agent name), `content.parts[]` (e.g. `text`, `functionCall`, `functionResponse`, `inlineData`), `actions.stateDelta` (session state updates), `actions.artifactDelta`, `turnComplete`.
+
+---
+
+## Agent types and patterns
+
+- **LlmAgent** — LLM decides what to do; can have tools, planner, `output_schema`, `output_key`.
+- **SequentialAgent** — Fixed pipeline of sub-agents; no LLM routing between steps. Data flows via `session.state` and each sub-agent’s `output_key`.
+- **AgentTool(agent=...)** — Wraps an agent (e.g. a pipeline) as a tool of another agent. The root agent’s LLM decides *when* to call it; execution is deterministic.
+- **Session state** — Shared dict between agents. Each agent can write to one key via `output_key`; downstream agents read that key. **Do not** store large blobs (e.g. base64 images) in state — they get injected into the next agent’s context. Use references (cache keys, artifact IDs) or strip payloads before writing to state.
+- **output_schema** — Pydantic model; ADK enforces that the LLM’s response is valid JSON matching the schema. Use for structured reports, not string parsing.
+- **BuiltInPlanner** — ADK’s planner for tool-heavy agents; can use `ThinkingConfig(include_thoughts=True)` so the model reasons before calling tools.
+
+---
+
+## Data flow and context
+
+- **Output key isolation:** Each pipeline agent writes to a single `output_key` in `session.state`. Downstream agents read only that key, not the full conversation history of the previous agent. This keeps context small.
+- **Truncation pipeline:** Tool outputs should be bounded before reaching the LLM: Pydantic field validators (per-field caps), recursive `truncate_strings_for_llm()`, and strip base64/large blobs. Cache full payloads for the frontend; return metadata-only or trimmed data to the agent.
+- **Artifacts:** Use `save_artifact()` (when `tool_context` is present) for binaries (images, files). Artifacts are stored separately and do not bloat the LLM context unless explicitly passed. Return status strings from tools, not raw bytes.
+
+---
+
+## Frontend and custom API
+
+- **Single app:** Uvicorn runs one FastAPI app. ADK mounts agent/session routes; the project mounts static frontend and custom routes (e.g. `/api/charts`, `/api/log_stream`) on the same app. One origin, no CORS.
+- **Session state for UI:** After a run, the frontend reads session state (e.g. GET session or state in response) to get structured data like `session.state["stock_report"]`. The event stream’s `content.parts[].text` is for streaming display; structured data lives in state.
+- **ADK dev UI:** `adk web` — event content parts (text, functionCall/Response, inlineData) are rendered. Custom frontends can consume `session.state` and render their own UI.
+
+---
+
+## Evals (ADK)
+
+- **Test file:** `*.test.json` = one EvalSet (one or more eval cases). Optional `test_config.json` for criteria.
+- **CLI:** `adk eval <AGENT_PATH> <EVALSET_FILE_OR_DIR>` — agent path = directory with `__init__.py` exposing `root_agent` (e.g. `stock_analyst`).
+- **Criteria:** e.g. `tool_trajectory_avg_score`, `response_match_score` (reference-based); `rubric_based_final_response_quality_v1` (LLM-as-judge, no single reference). For persona or variable wording, use rubrics instead of strict response match.
+
+---
+
+## References in this repo (draft)
+
+- **MarginCall/AGENTIC_ENGINEERING.md** — Six failure modes, context management, planning, structured output, agents vs workflows.
+- **MarginCall/ENGINEERING.md** — Architecture, cost engineering, cache tiers, token budget.
+- **MarginCall/docs/FrontendBackendMemo.md** — How ADK and the FastAPI app fit together.
+- **MarginCall/docs/UI.md** — ADK endpoints, event shape, session state for frontends.
+- **MarginCall/docs/how-we-fixed-llm-tpm-bloat-from-session-state.md** — Session state and tool return stripping.
+- **MarginCall/docs/AIEvalsPlan.md** — ADK evaluate, test files, criteria.
+
+When editing or discussing ADK agents, prefer these docs (and the upstream [google/adk-python](https://github.com/google/adk-python) / adk-docs) over guessing API or patterns.

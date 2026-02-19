@@ -1,58 +1,23 @@
 # draft
 
-Private repo for documents and tech details extracted from other repositories (not shared in the original repos).
+A document mirror: pull documentations files from other repos (or GitHub URLs) into one place and browse them in a simple web UI with full-text search and AI assistence.
 
-## Layout
+This can also be a MCP server for other AI agents. [TODO] 
 
-Each source repo has its own subdirectory. Only `.md` files are mirrored, preserving the same directory structure as the source (excluding top-level `README.md`, `CLAUDE.md`, and contents of `.claude` / `.cursor`).
-
-### MarginCall
-
-- `MarginCall/` — docs from [MarginCall](https://github.com/shanjing/MarginCall)
-  - Root: `ENGINEERING.md`, `AGENTIC_ENGINEERING.md`
-  - `docs/` — design and how-to docs
-  - `tests/README.md`, `tools/cache/README.md`
-
-**Tracked repos** are listed in **`sources.yaml`** (subdirectory name → `source` path and optional `url`). If the source path is a git repo, its origin URL is added to the file (when adding with `-a` or on the next pull).
-
-## Updating from source repos (pull)
-
-From the draft repo root, run:
+## Get started (the quickest way)
 
 ```bash
-python3 scripts/pull.py
+./setup.sh
 ```
 
-This reads `sources.yaml`, finds all `.md` files in each `source` path (with the same exclusions as in `CLAUDE.md`), and copies them into the matching subdirectory under draft **only when the source file is newer**. It does not delete files in draft when they are removed from the source (pull only, not sync). Use this after changing docs in a tracked repo to refresh draft.
+## Start it manually
 
-**Setup (optional):** Run `./setup.sh` to create `.venv`, install dependencies, and install an activation banner (block-art “draft” in light blue when you `source .venv/bin/activate`).
-
-**Options** (requires `click`; `pip install click` or use the repo’s `.venv`):
-
-- **`-r DIRECTORY`** — List all included `.md` files from a repo (path). The repo does not need to be in `sources.yaml`; any directory is valid.
-- **`-s`** — With `-r`, show the first 3 lines of each listed file.
-- **`-v`** — Verbose: show each repo being scanned and all tracked files in tree format (like Linux `tree`).
-- **`-a REPO`** — Add a repo to management: pass a **repo name** (e.g. `OtherRepo`; uses `../OtherRepo` as path) or a **relative/absolute path** (e.g. `../OtherRepo`). Updates `sources.yaml` and runs pull so the new repo is scanned immediately.
-
-Examples: `python3 scripts/pull.py -r ../MarginCall` (list); `python3 scripts/pull.py -r ../OtherRepo -s` (list with snippets).
-
-## Document UI (browse index)
-
-A simple web UI lists all tracked documents in a tree and lets you open and read them (rendered markdown).
-
-**CLI (from repo root):**
-
-```bash
-# With venv
-.venv/bin/python scripts/serve.py
-
-# Or
-python3 -m uvicorn ui.app:app --host 0.0.0.0 --port 8058
+```
+source .venv/bin/activate   # optional: activation banner + deps
+python scripts/serve.py     # start UI at http://localhost:8058
 ```
 
-Then open **http://localhost:8058**.
-
-**Docker:**
+## Run draft as a local Docker container:
 
 ```bash
 docker build -t draft-ui .
@@ -65,7 +30,36 @@ Open **http://localhost:8058**. The image includes `sources.yaml` and all repo s
 docker run -p 8058:8058 -v "$(pwd)":/app draft-ui
 ```
 
-## Adding another repo
+## sources.yaml
 
-1. Add an entry to **`sources.yaml`** (e.g. `OtherRepo: { source: ../OtherRepo }`).
-2. Create a subdirectory named after the repo and copy only the `.md` files you want to keep private, preserving paths (see `CLAUDE.md` for full rules and exclusions).
+Lists the repos (sources) that draft tracks. Each entry is a subdirectory name and a `source`:
+
+- **Local path** — e.g. `./MarginCall` or `../OtherRepo`. Run `python scripts/pull.py` to copy `.md` files from that path into draft.
+- **GitHub URL** — e.g. `https://github.com/owner/repo`. Pull fetches `.md` files via the GitHub API (no clone).
+
+Add a source from the UI (**Add source** in the sidebar) or from the CLI:
+
+```bash
+python scripts/pull.py -a ../OtherRepo
+python scripts/pull.py -a https://github.com/owner/repo
+```
+
+You can also edit `sources.yaml` by hand (add a `repos:` key and entries with `source:`), then run `python scripts/pull.py` to refresh. One optional `url:` per repo is allowed (e.g. git origin); it is backfilled for local git repos.
+
+## Ask (AI) over your docs
+
+The **Ask (AI)** panel (top of the content area) answers questions using only your indexed docs (RAG). You need:
+
+1. **Build the AI index once:** `python scripts/index_for_ai.py` (requires Python 3.11 or 3.12; ChromaDB does not support 3.14 yet).
+2. **A local LLM or API key:**
+   - **Local:** Run **Ollama** and at least one model (e.g. `ollama run qwen3:8b`). Default model is `qwen3:8b`; override with **OLLAMA_MODEL** (env or `.env`). When you run `./setup.sh`, choose "Configure Ask (AI) LLM?" to see `ollama list` and instructions.
+   - **Cloud:** Set **ANTHROPIC_API_KEY**; Ask (AI) then uses Claude instead of Ollama. Easiest: copy `.env.example` to `.env` and add `ANTHROPIC_API_KEY=sk-...` (the app loads `.env` when started with `python scripts/serve.py`).
+
+No local LLM is needed for the rest of Draft (tree, search, pull, add source). See `docs/local-oracle-design.md` for details.
+
+## Adding Document Sources
+
+The quickest way:
+```
+./setup.sh
+```

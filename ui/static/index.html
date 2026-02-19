@@ -23,15 +23,14 @@
       <button type="button" id="btn-search" class="btn btn-search" title="Search"><span class="material-symbols-outlined btn-search-icon" aria-hidden="true">search</span> Search</button>
     </div>
   </header>
-  <div class="layout">
-    <aside class="sidebar">
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar">
       <div class="sidebar-toolbar">
         <button type="button" id="btn-pull" class="btn btn-small btn-primary btn-icon-text" title="Pull latest from managed repos"><span class="toolbar-btn-icon" aria-hidden="true">↻</span> Pull</button>
         <button type="button" id="btn-collapse" class="btn btn-small btn-icon-text" title="Collapse all folders"><span class="toolbar-btn-icon" aria-hidden="true">▼</span> Collapse</button>
         <button type="button" id="btn-expand" class="btn btn-small btn-icon-text" title="Expand all folders"><span class="toolbar-btn-icon" aria-hidden="true">▶</span> Expand</button>
       </div>
       <div id="pull-status" class="pull-status hidden"></div>
-      <!-- System console (Matrix-style), under Pull button -->
       <div id="system-console" class="system-console collapsed">
         <div class="system-console-header" id="system-console-toggle">
           <span class="system-console-pulse"></span>
@@ -46,7 +45,26 @@
       </div>
       <nav id="tree" class="tree" aria-label="Document tree"></nav>
     </aside>
+    <div class="sidebar-resize" id="sidebar-resize" title="Drag to resize sidebar" aria-label="Resize sidebar"></div>
     <main class="content">
+      <div class="content-top">
+        <div id="ask-ai" class="ask-ai ask-ai-inline collapsed">
+          <div class="ask-ai-header" id="ask-ai-toggle">
+            <span class="ask-ai-icon">◇</span>
+            <span>Ask (AI)</span>
+            <span class="ask-ai-chevron"></span>
+          </div>
+          <div class="ask-ai-body">
+            <label for="ask-query-input" class="ask-ai-label">Question (answered from your docs only)</label>
+            <textarea id="ask-query-input" class="ask-query-input" rows="2" placeholder="e.g. How do we set up X?" aria-label="Ask a question"></textarea>
+            <button type="button" id="ask-submit" class="btn btn-small btn-primary ask-submit">Ask</button>
+            <p class="ask-hint">Index: run <code>python scripts/index_for_ai.py</code> or <button type="button" id="ask-reindex" class="btn-link">Rebuild AI index</button></p>
+            <div id="ask-answer" class="ask-answer hidden"></div>
+            <div id="ask-citations" class="ask-citations hidden"></div>
+            <div id="ask-error" class="ask-error hidden"></div>
+          </div>
+        </div>
+      </div>
       <div id="placeholder" class="placeholder">Select a document from the tree.</div>
       <article id="doc" class="doc hidden"></article>
       <div id="error" class="error hidden"></div>
