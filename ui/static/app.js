@@ -18,16 +18,40 @@
     errorEl.classList.remove('hidden');
   }
 
-  function showDoc(html) {
+  function showDoc(html, sourceType) {
     placeholderEl.classList.add('hidden');
     errorEl.classList.add('hidden');
     docEl.innerHTML = html;
+    var emoji = sourceType && SOURCE_EMOJI[sourceType];
+    if (emoji) {
+      var h1 = docEl.querySelector('h1');
+      if (h1) {
+        var badge = document.createElement('span');
+        badge.className = 'doc-source-badge' + (sourceType === 'cloud' ? ' doc-source-cloud' : '');
+        badge.setAttribute('aria-hidden', 'true');
+        badge.textContent = ' ' + emoji;
+        h1.appendChild(badge);
+      }
+    }
     docEl.classList.remove('hidden');
   }
 
   var lastRepos = [];
+  var repoSourceTypeMap = {};
   var REPO_ORDER_KEY = 'draft-repo-order';
   var REPO_PINNED_KEY = 'draft-repo-pinned';
+
+  function getSourceType(repo) {
+    var name = (repo.name || '').toLowerCase();
+    var url = (repo.url || '');
+    if (name === 'vault') return 'vault';
+    if (name === 'x') return 'x';
+    if (url.indexOf('github.com') !== -1) return 'github';
+    if (name.indexOf('google') !== -1 || name.indexOf('gdoc') !== -1 || name.indexOf('cloud') !== -1) return 'cloud';
+    return 'local';
+  }
+
+  var SOURCE_EMOJI = { vault: '🔐', github: '🐙', x: '🐦', cloud: '☁️', local: '💾' };
 
   function getRepoOrder() {
     try {
@@ -83,6 +107,11 @@
       if (bi === -1) return -1;
       return ai - bi;
     });
+    // Vault always first
+    var vaultIdx = ordered.findIndex(function (r) { return r.name === 'vault'; });
+    if (vaultIdx > 0) {
+      ordered.splice(0, 0, ordered.splice(vaultIdx, 1)[0]);
+    }
     return ordered;
   }
 
@@ -93,27 +122,41 @@
     }
     lastRepos = repos;
     var ordered = applyOrder(repos);
+    ordered.forEach(function (r) { repoSourceTypeMap[r.name] = getSourceType(r); });
     var pinned = getPinnedRepos();
     var pinnedSet = {};
     pinned.forEach(function (p) { pinnedSet[p] = true; });
     var html = '';
-    ordered.forEach(function (repo) {
+    ordered.forEach(function (repo, idx) {
+      var isVault = repo.name === 'vault';
       var isPinned = pinnedSet[repo.name];
-      html += '<div class="repo-block collapsed" data-repo="' + escapeAttr(repo.name) + '">';
+      var sourceType = getSourceType(repo);
+      html += '<div class="repo-block collapsed' + (isVault ? ' vault-repo' : '') + '" data-repo="' + escapeAttr(repo.name) + '" data-source-type="' + escapeAttr(sourceType) + '">';
       html += '<div class="repo-header">';
       html += '<button type="button" class="btn-repo-collapse" title="Collapse/expand this repo" aria-expanded="false"><span class="repo-btn-icon" aria-hidden="true">▶</span></button>';
-      html += '<span class="repo-name">' + escapeHtml(repo.name) + '</span>';
-      html += '<button type="button" class="btn-repo-pin' + (isPinned ? ' pinned' : '') + '" title="' + (isPinned ? 'Unpin' : 'Pin to top') + '" data-repo="' + escapeAttr(repo.name) + '" aria-label="' + (isPinned ? 'Unpin' : 'Pin to top') + '"><span class="pin-icon-wrap"><span class="repo-btn-icon" aria-hidden="true">📌</span><span class="pin-toggle" aria-hidden="true">✓</span></span></button>';
-      html += '<button type="button" class="btn-repo-down" title="Move to bottom" data-repo="' + escapeAttr(repo.name) + '" aria-label="Move to bottom"><span class="repo-btn-icon" aria-hidden="true">↓</span></button>';
+      if (isVault) {
+        html += '<span class="repo-name vault-name">' + escapeHtml(repo.name) + ' <span class="vault-icon" aria-hidden="true">🔐</span></span>';
+      } else {
+        html += '<span class="repo-name">' + escapeHtml(repo.name) + '</span>';
+      }
+      if (!isVault) {
+        html += '<button type="button" class="btn-repo-pin' + (isPinned ? ' pinned' : '') + '" title="' + (isPinned ? 'Unpin' : 'Pin to top') + '" data-repo="' + escapeAttr(repo.name) + '" aria-label="' + (isPinned ? 'Unpin' : 'Pin to top') + '"><span class="repo-btn-icon pin-emoji" aria-hidden="true">📌</span></button>';
+        html += '<button type="button" class="btn-repo-down" title="Move to bottom" data-repo="' + escapeAttr(repo.name) + '" aria-label="Move to bottom"><span class="repo-btn-icon" aria-hidden="true">↓</span></button>';
+      }
       html += '</div>';
       html += '<ul class="repo-tree">' + renderChildren(repo.tree, repo.name, '') + '</ul></div>';
+      if (isVault) {
+        html += '<div class="tree-vault-separator" aria-hidden="true"></div>';
+      }
     });
     treeEl.innerHTML = html;
 
     treeEl.querySelectorAll('a[data-repo][data-path]').forEach(function (a) {
       a.addEventListener('click', function (e) {
         e.preventDefault();
-        loadDoc(a.dataset.repo, a.dataset.path);
+        var block = a.closest('.repo-block');
+        var sourceType = block ? block.dataset.sourceType : (repoSourceTypeMap[a.dataset.repo] || 'local');
+        loadDoc(a.dataset.repo, a.dataset.path, sourceType);
       });
     });
     treeEl.querySelectorAll('.tree-dir .dir-label').forEach(function (label) {
@@ -156,7 +199,8 @@
           order = order.filter(function (n) { return n !== name; });
           order.splice(pinned.length, 0, name);
         } else {
-          pinned = pinned.concat([name]);
+          /* Only one repo pinned at a time: new pin replaces any previous. */
+          pinned = [name];
           order = order.filter(function (n) { return n !== name; });
           order.unshift(name);
         }
@@ -357,7 +401,8 @@
     return escapeHtml(s).replace(/"/g, '&quot;');
   }
 
-  function loadDoc(repo, path) {
+  function loadDoc(repo, path, sourceType) {
+    if (sourceType === undefined) sourceType = repoSourceTypeMap[repo] || 'local';
     fetch('/api/doc/' + encodeURIComponent(repo) + '/' + path.split('/').map(encodeURIComponent).join('/'))
       .then(function (r) {
         if (!r.ok) throw new Error(r.status === 404 ? 'Not found' : 'Failed to load');
@@ -365,9 +410,9 @@
       })
       .then(function (md) {
         if (typeof marked !== 'undefined') {
-          showDoc(marked.parse(md, { gfm: true }));
+          showDoc(marked.parse(md, { gfm: true }), sourceType);
         } else {
-          showDoc('<pre>' + escapeHtml(md) + '</pre>');
+          showDoc('<pre>' + escapeHtml(md) + '</pre>', sourceType);
         }
       })
       .catch(function (err) {
@@ -482,11 +527,11 @@
     var askPanel = document.getElementById('ask-ai');
     var askToggle = document.getElementById('ask-ai-toggle');
     var queryInput = document.getElementById('ask-query-input');
-    var askSubmit = document.getElementById('ask-submit');
     var answerEl = document.getElementById('ask-answer');
     var citationsEl = document.getElementById('ask-citations');
     var errorEl = document.getElementById('ask-error');
-    if (!askPanel || !askSubmit || !queryInput) return;
+    if (!askPanel || !queryInput) return;
+    var askInProgress = false;
 
     askToggle.addEventListener('click', function () {
       askPanel.classList.toggle('collapsed');
@@ -502,10 +547,11 @@
           .then(function (r) { return r.json(); })
           .then(function (d) {
             reindexBtn.textContent = d.ok ? 'Rebuild AI index (' + (d.indexed || 0) + ' chunks)' : 'Rebuild AI index';
-            if (d.ok) appendConsoleLine('AI index built: ' + (d.indexed || 0) + ' chunks.');
+            if (d.logs && d.logs.length) appendConsoleLines(d.logs);
+            else if (d.ok) appendConsoleLine('AI index built: ' + (d.indexed || 0) + ' chunks.');
             if (!d.ok && d.error) {
               showAskError(d.error);
-              appendConsoleLine('AI reindex failed: ' + (d.error || ''));
+              if (!(d.logs && d.logs.length)) appendConsoleLine('AI reindex failed: ' + (d.error || ''));
             }
           })
           .catch(function (err) {
@@ -542,9 +588,11 @@
       return { events: events, rest: rest };
     }
 
-    askSubmit.addEventListener('click', function () {
+    function runAsk() {
       var query = (queryInput.value || '').trim();
-      if (!query) return;
+      if (!query || askInProgress) return;
+      askInProgress = true;
+      queryInput.disabled = true;
       answerEl.classList.add('hidden');
       answerEl.textContent = '';
       citationsEl.classList.add('hidden');
@@ -552,10 +600,14 @@
       showAskError('');
       answerEl.classList.remove('hidden');
       answerEl.textContent = '…';
-      askSubmit.disabled = true;
 
       appendConsoleLine('$ ask: ' + query);
       appendConsoleLine('Streaming…');
+
+      function done() {
+        askInProgress = false;
+        queryInput.disabled = false;
+      }
 
       fetch('/api/ask', {
         method: 'POST',
@@ -563,7 +615,18 @@
         body: JSON.stringify({ query: query })
       })
         .then(function (res) {
-          if (!res.ok) throw new Error('Ask failed');
+          if (!res.ok) {
+            return res.text().then(function (body) {
+              var msg = 'Ask failed (' + res.status + ')';
+              try {
+                var o = JSON.parse(body);
+                if (o.detail) msg += ': ' + o.detail;
+              } catch (e) {
+                if (body && body.length < 100) msg += ': ' + body;
+              }
+              throw new Error(msg);
+            });
+          }
           return res.body.getReader();
         })
         .then(function (reader) {
@@ -611,21 +674,28 @@
           function finish() {
             if (!answerEl.textContent || answerEl.textContent === '…') answerEl.textContent = '(No answer.)';
             appendConsoleLine('Ask complete.');
-            askSubmit.disabled = false;
+            done();
           }
           return read().catch(function (err) {
             showAskError(err.message || 'Request failed.');
             appendConsoleLine('Ask failed: ' + (err.message || ''));
             answerEl.classList.add('hidden');
-            askSubmit.disabled = false;
+            done();
           });
         })
         .catch(function (err) {
           showAskError(err.message || 'Request failed.');
           appendConsoleLine('Ask failed: ' + (err.message || ''));
           answerEl.classList.add('hidden');
-          askSubmit.disabled = false;
+          done();
         });
+    }
+
+    queryInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        runAsk();
+      }
     });
   })();
 

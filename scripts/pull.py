@@ -32,6 +32,7 @@ EXCLUDE_DIRS = (
     ".tmp",
     ".adk",
 )
+DOC_SOURCES_DIR = ".doc_sources"
 
 
 def parse_repos_yaml(path: Path) -> dict[str, dict]:
@@ -343,8 +344,8 @@ def _normalize_sources_yaml(sources_yaml: Path) -> None:
         sources_yaml.write_text("".join(new_lines))
 
 
-def do_pull(draft_root: Path, verbose: bool) -> None:
-    """Run pull from sources.yaml."""
+def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
+    """Run pull from sources.yaml. When quiet, only echo summary lines (for UI console)."""
     sources_yaml = draft_root / "sources.yaml"
     if not sources_yaml.is_file():
         raise click.ClickException(f"sources.yaml not found at {sources_yaml}")
@@ -356,6 +357,7 @@ def do_pull(draft_root: Path, verbose: bool) -> None:
         return
 
     click.echo("Pull started.")
+    (draft_root / DOC_SOURCES_DIR).mkdir(parents=True, exist_ok=True)
     for name, repo in repos.items():
         source_path = repo["source"].strip()
 
@@ -366,24 +368,26 @@ def do_pull(draft_root: Path, verbose: bool) -> None:
                 click.echo(f"Skip {name}: invalid GitHub URL", err=True)
                 continue
             owner, repo_name = parsed
-            click.echo(f"[GitHub] Fetching {owner}/{repo_name} via API")
-            if verbose:
+            if not quiet:
+                click.echo(f"[GitHub] Fetching {owner}/{repo_name} via API")
+            if verbose and not quiet:
                 click.echo(f"{name}")
             try:
-                files = _fetch_md_from_github(owner, repo_name, verbose)
+                files = _fetch_md_from_github(owner, repo_name, verbose and not quiet)
             except click.ClickException as e:
                 click.echo(f"Skip {name}: {e}", err=True)
                 continue
-            if verbose and files:
+            if verbose and not quiet and files:
                 tree = _paths_to_tree([p for p, _ in files])
                 _print_tree(tree)
                 click.echo()
             updated = 0
             for rel_str, content in files:
-                dest = draft_root / name / rel_str
+                dest = draft_root / DOC_SOURCES_DIR / name / rel_str
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(content)
-                click.echo(f"  [API] {rel_str}")
+                if not quiet:
+                    click.echo(f"  [API] {rel_str}")
                 updated += 1
             if updated > 0:
                 click.echo(f"[Done] {name}: {updated} file(s) updated")
@@ -420,23 +424,24 @@ def do_pull(draft_root: Path, verbose: bool) -> None:
                 continue
             paths.append(rel_str)
 
-        if verbose:
+        if verbose and not quiet:
             click.echo(f"{name}")
             if paths:
                 tree = _paths_to_tree(paths)
                 _print_tree(tree)
             click.echo()
 
-        # Pull only: copy from source into draft; never delete files in draft.
-        click.echo(f"[Local] {name} from {source_root}")
+        if not quiet:
+            click.echo(f"[Local] {name} from {source_root}")
         updated = 0
         for rel_str in paths:
             f = source_root / rel_str
-            dest = draft_root / name / rel_str
+            dest = draft_root / DOC_SOURCES_DIR / name / rel_str
             dest.parent.mkdir(parents=True, exist_ok=True)
             if not dest.exists() or f.stat().st_mtime > dest.stat().st_mtime:
                 shutil.copy2(f, dest)
-                click.echo(f"  [Copy] {rel_str}")
+                if not quiet:
+                    click.echo(f"  [Copy] {rel_str}")
                 updated += 1
 
         if updated > 0:
@@ -445,7 +450,7 @@ def do_pull(draft_root: Path, verbose: bool) -> None:
             click.echo(f"[Done] {name}: up to date")
 
 
-def do_add_repo(draft_root: Path, add_arg: str, verbose: bool) -> None:
+def do_add_repo(draft_root: Path, add_arg: str, verbose: bool, quiet: bool = False) -> None:
     """Add a repo to sources.yaml and run pull (including the new repo).
     add_arg can be: local path, repo name (../name), or GitHub URL (no clone).
     """
@@ -470,7 +475,7 @@ def do_add_repo(draft_root: Path, add_arg: str, verbose: bool) -> None:
         _add_repo_to_yaml(sources_yaml, name, source_path, url=source_path)
         click.echo(f"Added {name} -> {source_path} (pull fetches .md from GitHub)")
         click.echo()
-        do_pull(draft_root, verbose)
+        do_pull(draft_root, verbose, quiet=quiet)
         return
 
     if _is_path_like(add_arg):
@@ -494,7 +499,7 @@ def do_add_repo(draft_root: Path, add_arg: str, verbose: bool) -> None:
     _add_repo_to_yaml(sources_yaml, name, source_path, url=git_url)
     click.echo(f"Added {name} -> {source_path}" + (f" ({git_url})" if git_url else ""))
     click.echo()
-    do_pull(draft_root, verbose)
+    do_pull(draft_root, verbose, quiet=quiet)
 
 
 @click.command()
@@ -526,21 +531,29 @@ def do_add_repo(draft_root: Path, add_arg: str, verbose: bool) -> None:
     default=None,
     help="Add a repo to management: pass repo name (e.g. OtherRepo) or relative path (e.g. ../OtherRepo). Updates sources.yaml and runs pull.",
 )
+@click.option(
+    "-q",
+    "quiet",
+    is_flag=True,
+    default=False,
+    help="Summary only: one line per repo (for UI system console).",
+)
 def main(
     repo_path: Path | None,
     snippet: bool,
     verbose: bool,
     add_repo: str | None,
+    quiet: bool,
 ) -> None:
     script_dir = Path(__file__).resolve().parent
     draft_root = script_dir.parent
 
     if add_repo is not None:
-        do_add_repo(draft_root, add_repo, verbose)
+        do_add_repo(draft_root, add_repo, verbose, quiet=quiet)
     elif repo_path is not None:
         list_md_in_repo(repo_path, snippet)
     else:
-        do_pull(draft_root, verbose)
+        do_pull(draft_root, verbose, quiet=quiet)
 
 
 if __name__ == "__main__":

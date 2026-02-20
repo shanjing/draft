@@ -9,6 +9,7 @@ from whoosh.fields import ID, TEXT, Schema
 from whoosh.index import create_in, open_dir, exists_in
 from whoosh.qparser import QueryParser
 
+DOC_SOURCES_DIR = ".doc_sources"
 INDEX_DIR = ".search_index"
 CONTENT_FIELD = "content"
 
@@ -26,9 +27,12 @@ def get_schema() -> Schema:
 
 
 def build_index(draft_root: Path) -> int:
-    """Index all .md files under draft_root/<repo>/. Returns number of documents indexed."""
+    """Index all .md files under draft_root/.doc_sources/<repo>/. Returns number of documents indexed."""
     idx_path = _index_path(draft_root)
     idx_path.mkdir(parents=True, exist_ok=True)
+    sources_dir = draft_root / DOC_SOURCES_DIR
+    if not sources_dir.is_dir():
+        return 0
 
     schema = get_schema()
     if exists_in(str(idx_path)):
@@ -39,7 +43,7 @@ def build_index(draft_root: Path) -> int:
 
     count = 0
     writer = ix.writer()
-    for repo_dir in draft_root.iterdir():
+    for repo_dir in sources_dir.iterdir():
         if not repo_dir.is_dir() or repo_dir.name.startswith("."):
             continue
         for f in repo_dir.rglob("*.md"):

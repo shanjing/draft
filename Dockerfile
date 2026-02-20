@@ -1,4 +1,4 @@
-# Draft UI: document index browser. Build from repo root: docker build -t draft-ui .
+# Draft UI: Your intelligence, vaulted. index browser. Build from repo root: docker build -t draft-ui .
 FROM python:3.12-slim
 
 WORKDIR /app

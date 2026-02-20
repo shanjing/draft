@@ -2,7 +2,7 @@
 
 This repo stores private documents (tech details, drafts) extracted from other repositories. Each source repo has its own top-level subdirectory; only `.md` files are mirrored, with the same directory structure.
 
-**Tracked repos** are listed in **`sources.yaml`**: each key is the subdirectory name in draft; each value has `source` (path or GitHub URL) and optionally a single `url` (git origin URL). For local paths that are git repos, `url` is added automatically when using `scripts/pull.py -a` or on the next pull. Each repo block must have at most one `url` line (duplicates are normalized on pull).
+**Tracked repos** are listed in **`sources.yaml`**: each key is the subdirectory name under **`.doc_sources/`** in draft; each value has `source` (path or GitHub URL) and optionally a single `url` (git origin URL). For local paths that are git repos, `url` is added automatically when using `scripts/pull.py -a` or on the next pull. Each repo block must have at most one `url` line (duplicates are normalized on pull).
 
 **Sources:** A source can be (1) a **local path** (e.g. `../OtherRepo`, `./MarginCall`), or (2) a **GitHub URL** (e.g. `https://github.com/owner/repo`). GitHub sources are fetched via the GitHub API (no clone); `.md` files are pulled with the same exclusions as local.
 
@@ -43,7 +43,7 @@ The script updates `sources.yaml`, adds `url` for local git repos (or uses the U
 ### 3. Which .md files to include
 
 - **Copy only `.md` files** from the source repo.
-- **Preserve directory structure**: path in draft must match path under the source (e.g. `source/docs/foo.md` → `draft/<RepoName>/docs/foo.md`).
+- **Preserve directory structure**: path in draft must match path under the source (e.g. `source/docs/foo.md` → `draft/.doc_sources/<RepoName>/docs/foo.md`).
 - **Create only directories that contain at least one copied `.md`**; do not create empty or extra directories.
 
 ### 4. Exclusions (do not copy)
@@ -57,7 +57,7 @@ The script updates `sources.yaml`, adds `url` for local git repos (or uses the U
 
 - Update the top-level **`README.md`** in draft: add a short bullet for the new repo (name, link if you have `url`, and what’s in it).
 
-To **stop tracking** a repo: remove its entry from `sources.yaml` and optionally delete its subdirectory in draft.
+To **stop tracking** a repo: remove its entry from `sources.yaml` and optionally delete its subdirectory under `draft/.doc_sources/<name>`.
 
 ---
 

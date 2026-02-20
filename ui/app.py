@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 DRAFT_ROOT = Path(__file__).resolve().parent.parent
+DOC_SOURCES_DIR = ".doc_sources"
 if str(DRAFT_ROOT) not in sys.path:
     sys.path.insert(0, str(DRAFT_ROOT))
 
@@ -21,6 +22,9 @@ try:
     load_dotenv(DRAFT_ROOT / ".env")
 except ImportError:
     pass
+
+from lib.log import logger, configure as configure_log
+configure_log()
 
 
 def _parse_repos_yaml(path: Path) -> dict:
@@ -77,14 +81,21 @@ def _paths_to_tree_node(paths: list[str]) -> dict:
     return {"name": "", "type": "dir", "children": [to_node(k, v) for k, v in sorted(root.items(), key=lambda x: (0 if isinstance(x[1], dict) else 1, x[0]))]}
 
 
+def _doc_sources_root() -> Path:
+    """Root for repo dirs: .doc_sources if present, else draft root (legacy)."""
+    doc_sources = DRAFT_ROOT / DOC_SOURCES_DIR
+    return doc_sources if doc_sources.is_dir() else DRAFT_ROOT
+
+
 def get_tree() -> list:
     sources_yaml = DRAFT_ROOT / "sources.yaml"
     if not sources_yaml.is_file():
         return []
     repos = _parse_repos_yaml(sources_yaml)
+    base = _doc_sources_root()
     result = []
     for name in repos:
-        repo_dir = DRAFT_ROOT / name
+        repo_dir = base / name
         if not repo_dir.is_dir():
             continue
         paths = []
@@ -125,9 +136,30 @@ class AskBody(BaseModel):
     query: str = ""
 
 
+@app.get("/api/llm_status")
+def api_llm_status():
+    """Return current LLM provider and model from env (for debugging)."""
+    from lib import ai_engine
+    ai_engine._ensure_env_loaded(DRAFT_ROOT)
+    provider = ai_engine._env_strip("DRAFT_LLM_PROVIDER", "")
+    model = ai_engine._env_strip("OLLAMA_MODEL") or ai_engine._env_strip("LOCAL_AI_MODEL") or ""
+    if model and model.startswith("ollama_chat/"):
+        model = model.replace("ollama_chat/", "", 1)
+    if not model and provider == "ollama":
+        model = "qwen3:8b"
+    cloud = ai_engine._env_strip("CLOUD_AI_MODEL", "")
+    if not provider and cloud:
+        provider = "gemini"
+        model = cloud
+    if not provider:
+        provider = "ollama"
+        model = model or "qwen3:8b"
+    return {"provider": provider, "model": model}
+
+
 @app.post("/api/ask")
 def api_ask(body: AskBody):
-    """Stream an AI answer over your docs via SSE. Requires AI index (run scripts/index_for_ai.py) and ANTHROPIC_API_KEY or Ollama."""
+    """Stream an AI answer over your docs via SSE. Requires AI index (run scripts/index_for_ai.py) and Ollama or cloud API key."""
     query = (body.query or "").strip()
     if not query:
         return {"error": "Missing query."}
@@ -155,12 +187,13 @@ def api_ask(body: AskBody):
 @app.post("/api/reindex_ai")
 def api_reindex_ai():
     """Rebuild the RAG vector index from draft docs (for the Ask feature)."""
+    logger.info("Reindex AI requested")
     try:
         from lib.ingest import build_index
         n = build_index(DRAFT_ROOT, verbose=False)
-        return {"ok": True, "indexed": n}
+        return {"ok": True, "indexed": n, "logs": ["Rebuilding AI index…", f"Indexed {n} chunks."]}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "logs": [f"Error: {e}"]}
 
 
 @app.get("/api/search")
@@ -198,10 +231,11 @@ def _pull_log_lines(stdout: str, stderr: str) -> list[str]:
 
 @app.post("/api/pull")
 def api_pull():
-    """Run scripts/pull.py to refresh docs from managed repos."""
+    """Run scripts/pull.py to refresh docs from managed repos (quiet = summary for UI)."""
+    logger.info("Pull requested")
     try:
         result = subprocess.run(
-            [sys.executable, str(DRAFT_ROOT / "scripts" / "pull.py")],
+            [sys.executable, str(DRAFT_ROOT / "scripts" / "pull.py"), "--quiet"],
             cwd=str(DRAFT_ROOT),
             capture_output=True,
             text=True,
@@ -239,7 +273,7 @@ def api_add_source(body: AddSourceBody):
         if not source:
             return {"ok": False, "error": "Missing source.", "logs": []}
         result = subprocess.run(
-            [sys.executable, str(DRAFT_ROOT / "scripts" / "pull.py"), "-a", source],
+            [sys.executable, str(DRAFT_ROOT / "scripts" / "pull.py"), "-a", source, "--quiet"],
             cwd=str(DRAFT_ROOT),
             capture_output=True,
             text=True,
@@ -262,10 +296,11 @@ def api_add_source(body: AddSourceBody):
 def api_doc(repo: str, path: str):
     if ".." in path or path.startswith("/"):
         raise HTTPException(status_code=400, detail="Invalid path")
-    full = DRAFT_ROOT / repo / path
+    base = _doc_sources_root()
+    full = base / repo / path
     try:
         full = full.resolve()
-        full.relative_to((DRAFT_ROOT / repo).resolve())
+        full.relative_to((base / repo).resolve())
     except (ValueError, OSError):
         raise HTTPException(status_code=404, detail="Not found")
     if not full.is_file() or full.suffix.lower() != ".md":
