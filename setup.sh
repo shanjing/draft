@@ -174,6 +174,12 @@ ensure_sources_yaml() {
 
 # --- Managed sources: offer to add new sources ---
 ensure_sources_yaml
+# Verify sources.yaml before reading it (mandatory: fail if invalid)
+if ! (cd "$SCRIPT_DIR" && "$PYTHON" scripts/verify_sources.py -r "$SCRIPT_DIR" -q 2>/dev/null); then
+  printf "${R}sources.yaml is invalid. Fix errors and re-run setup. Run: %s scripts/verify_sources.py -r %s${N}\n" "$PYTHON" "$SCRIPT_DIR" >&2
+  (cd "$SCRIPT_DIR" && "$PYTHON" scripts/verify_sources.py -r "$SCRIPT_DIR" 2>&1) || true
+  exit 1
+fi
 read -r -p "Add new sources? (y/n): " add_sources
 case "$add_sources" in
   [yY]|[yY][eE][sS])

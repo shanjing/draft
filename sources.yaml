@@ -1,6 +1,9 @@
+# Managed document sources. Edit by hand or add via UI / pull.py -a.
+# After adding or editing an entry, run:  python scripts/verify_sources.py
+# Use --check-paths to warn if vault or repo dirs do not exist yet.
 repos:
   vault:
-    source: ./.doc_sources/vault
+    source: ./vault
   shanjing_adk-lab:
     source: https://github.com/shanjing/adk-lab
   MarginCall:
