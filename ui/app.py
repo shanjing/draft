@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 DRAFT_ROOT = Path(__file__).resolve().parent.parent
 DOC_SOURCES_DIR = ".doc_sources"
+VAULT_DIR = "vault"
 if str(DRAFT_ROOT) not in sys.path:
     sys.path.insert(0, str(DRAFT_ROOT))
 
@@ -92,10 +93,13 @@ def get_tree() -> list:
     if not sources_yaml.is_file():
         return []
     repos = _parse_repos_yaml(sources_yaml)
-    base = _doc_sources_root()
+    doc_sources = _doc_sources_root()
     result = []
     for name in repos:
-        repo_dir = base / name
+        if name == VAULT_DIR:
+            repo_dir = DRAFT_ROOT / VAULT_DIR
+        else:
+            repo_dir = doc_sources / name
         if not repo_dir.is_dir():
             continue
         paths = []
@@ -115,6 +119,12 @@ def get_tree() -> list:
 
 
 app = FastAPI(title="Draft", description="Browse draft documents")
+
+try:
+    from lib.manifest import update_manifest
+    update_manifest(DRAFT_ROOT)
+except Exception:
+    pass
 
 
 @app.get("/api/tree")
@@ -267,7 +277,7 @@ class AddSourceBody(BaseModel):
 
 @app.post("/api/add_source")
 def api_add_source(body: AddSourceBody):
-    """Add a source (GitHub URL or local path). Same logic as pull.py -a."""
+    """Add a source (GitHub URL or local path). Same logic as pull.py -a. Verifies sources.yaml after add."""
     try:
         source = (body.source or "").strip()
         if not source:
@@ -282,10 +292,18 @@ def api_add_source(body: AddSourceBody):
         stdout = result.stdout or ""
         stderr = result.stderr or ""
         logs = _pull_log_lines(stdout, stderr)
-        if result.returncode == 0:
-            return {"ok": True, "message": stdout.strip() or "Source added.", "logs": logs}
-        err = (stderr or stdout or "Add failed.").strip()
-        return {"ok": False, "error": err, "logs": logs}
+        if result.returncode != 0:
+            err = (stderr or stdout or "Add failed.").strip()
+            return {"ok": False, "error": err, "logs": logs}
+        # Mandatory verify after add
+        from lib.verify_sources import verify_sources_yaml
+        path = DRAFT_ROOT / "sources.yaml"
+        ok, errors, warnings = verify_sources_yaml(path)
+        for w in warnings:
+            logs.append(f"Verify: {w}")
+        if not ok:
+            return {"ok": False, "error": "sources.yaml invalid after add: " + "; ".join(errors), "logs": logs}
+        return {"ok": True, "message": stdout.strip() or "Source added.", "logs": logs}
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "Add timed out.", "logs": ["Add timed out."]}
     except Exception as e:
@@ -296,11 +314,14 @@ def api_add_source(body: AddSourceBody):
 def api_doc(repo: str, path: str):
     if ".." in path or path.startswith("/"):
         raise HTTPException(status_code=400, detail="Invalid path")
-    base = _doc_sources_root()
-    full = base / repo / path
+    if repo == VAULT_DIR:
+        repo_root = DRAFT_ROOT / VAULT_DIR
+    else:
+        repo_root = _doc_sources_root() / repo
+    full = repo_root / path
     try:
         full = full.resolve()
-        full.relative_to((base / repo).resolve())
+        full.relative_to(repo_root.resolve())
     except (ValueError, OSError):
         raise HTTPException(status_code=404, detail="Not found")
     if not full.is_file() or full.suffix.lower() != ".md":

@@ -33,6 +33,7 @@ EXCLUDE_DIRS = (
     ".adk",
 )
 DOC_SOURCES_DIR = ".doc_sources"
+VAULT_DIR = "vault"
 
 
 def parse_repos_yaml(path: Path) -> dict[str, dict]:
@@ -359,6 +360,8 @@ def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
     click.echo("Pull started.")
     (draft_root / DOC_SOURCES_DIR).mkdir(parents=True, exist_ok=True)
     for name, repo in repos.items():
+        if name == VAULT_DIR:
+            continue  # Vault lives outside .doc_sources (e.g. ./vault); can later be S3/iCloud
         source_path = repo["source"].strip()
 
         # --- Remote GitHub: fetch .md via API, write to draft/name/ ---
@@ -445,9 +448,16 @@ def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
                 updated += 1
 
         if updated > 0:
-            click.echo(f"[Done] {name}: {updated} file(s) updated")
+                click.echo(f"[Done] {name}: {updated} file(s) updated")
         else:
-            click.echo(f"[Done] {name}: up to date")
+                click.echo(f"[Done] {name}: up to date")
+
+    try:
+        from lib.manifest import update_manifest
+        update_manifest(draft_root)
+        click.echo("Manifest updated (draft_config.json).")
+    except Exception:
+        pass
 
 
 def do_add_repo(draft_root: Path, add_arg: str, verbose: bool, quiet: bool = False) -> None:

@@ -48,7 +48,7 @@ python scripts/pull.py -a ../OtherRepo
 python scripts/pull.py -a https://github.com/owner/repo
 ```
 
-You can also edit `sources.yaml` by hand (add a `repos:` key and entries with `source:`), then run `python scripts/pull.py` to refresh. One optional `url:` per repo is allowed (e.g. git origin); it is backfilled for local git repos.
+You can also edit `sources.yaml` by hand (add a `repos:` key and entries with `source:`). After editing, run **`python scripts/verify_sources.py`** to check structure (use `--check-paths` to warn if vault or repo dirs don't exist yet). To get new sources into the system: run **Pull** (UI or `python scripts/pull.py`) to fetch/copy files; if you used the CLI, trigger **Reindex** so search includes them; then **Rebuild AI index** so Ask (AI) includes them. One optional `url:` per repo is allowed (e.g. git origin); it is backfilled for local git repos.
 
 ## Ask (AI) over your docs
 
@@ -63,7 +63,7 @@ No local LLM is needed for the rest of Draft (tree, search, pull, add source). S
 
 ## Vault
 
-The **vault** source (`./.doc_sources/vault`) can ship with the repo as the default doc set (e.g. `DRAFT.md`). It is listed in `sources.yaml` by default so it appears in the tree and can be searched and queried via Ask (AI) after indexing. If you keep `.doc_sources` out of git (see above), populate or sync it separately.
+The **vault** source (`./vault`) lives **outside** `.doc_sources/` so it can later be pointed at encrypted S3, iCloud, etc. It ships with the repo as the default doc set (e.g. `DRAFT.md`) and is listed in `sources.yaml` so it appears in the tree and can be searched and queried via Ask (AI) after indexing.
 
 ## Tests
 

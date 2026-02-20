@@ -26,7 +26,7 @@ def client(draft_root):
 
 @pytest.fixture
 def temp_draft_root(tmp_path):
-    """Temporary draft root with a minimal repo under .doc_sources (for ingest/chunk tests)."""
-    (tmp_path / ".doc_sources" / "vault").mkdir(parents=True)
-    (tmp_path / ".doc_sources" / "vault" / "DRAFT.md").write_text("# Draft\n\nDraft is a document mirror and RAG assistant.\n")
+    """Temporary draft root with vault/ (for ingest/chunk tests)."""
+    (tmp_path / "vault").mkdir(parents=True)
+    (tmp_path / "vault" / "DRAFT.md").write_text("# Draft\n\nDraft is a document mirror and RAG assistant.\n")
     return tmp_path

@@ -21,6 +21,7 @@ EXCLUDE_DIRS = (
 )
 
 DOC_SOURCES_DIR = ".doc_sources"
+VAULT_DIR = "vault"
 VECTOR_DIR = ".vector_store"
 COLLECTION_NAME = "draft_docs"
 
@@ -41,8 +42,26 @@ def should_include(rel_path: str) -> bool:
 
 
 def collect_chunks(draft_root: Path) -> list[Chunk]:
-    """Collect all chunks from draft/.doc_sources/<repo>/*.md using same exclusions as pull."""
+    """Collect chunks from vault/ and draft/.doc_sources/<repo>/*.md (same exclusions as pull)."""
     chunks: list[Chunk] = []
+    # Vault: separate from .doc_sources (can later point to S3/iCloud etc.)
+    vault_dir = draft_root / VAULT_DIR
+    if vault_dir.is_dir():
+        for f in vault_dir.rglob("*.md"):
+            try:
+                rel = f.relative_to(vault_dir)
+                path_str = rel.as_posix()
+            except ValueError:
+                continue
+            if not should_include(path_str):
+                continue
+            try:
+                content = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for c in chunk_markdown(VAULT_DIR, path_str, content):
+                chunks.append(c)
+    # .doc_sources: filesystem for pulled sources only
     sources_dir = draft_root / DOC_SOURCES_DIR
     if not sources_dir.is_dir():
         return chunks

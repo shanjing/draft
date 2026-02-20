@@ -10,6 +10,7 @@ from whoosh.index import create_in, open_dir, exists_in
 from whoosh.qparser import QueryParser
 
 DOC_SOURCES_DIR = ".doc_sources"
+VAULT_DIR = "vault"
 INDEX_DIR = ".search_index"
 CONTENT_FIELD = "content"
 
@@ -26,38 +27,44 @@ def get_schema() -> Schema:
     )
 
 
+def _add_repo_to_writer(writer, repo_name: str, repo_dir: Path) -> int:
+    count = 0
+    for f in repo_dir.rglob("*.md"):
+        try:
+            rel = f.relative_to(repo_dir)
+            path_str = rel.as_posix()
+        except ValueError:
+            continue
+        try:
+            content = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        writer.add_document(repo=repo_name, path=path_str, content=content)
+        count += 1
+    return count
+
+
 def build_index(draft_root: Path) -> int:
-    """Index all .md files under draft_root/.doc_sources/<repo>/. Returns number of documents indexed."""
+    """Index .md under vault/ and draft_root/.doc_sources/<repo>/. Returns document count."""
     idx_path = _index_path(draft_root)
     idx_path.mkdir(parents=True, exist_ok=True)
-    sources_dir = draft_root / DOC_SOURCES_DIR
-    if not sources_dir.is_dir():
-        return 0
-
     schema = get_schema()
     if exists_in(str(idx_path)):
         import shutil
         shutil.rmtree(idx_path)
         idx_path.mkdir(parents=True, exist_ok=True)
     ix = create_in(str(idx_path), schema)
-
-    count = 0
     writer = ix.writer()
-    for repo_dir in sources_dir.iterdir():
-        if not repo_dir.is_dir() or repo_dir.name.startswith("."):
-            continue
-        for f in repo_dir.rglob("*.md"):
-            try:
-                rel = f.relative_to(repo_dir)
-                path_str = rel.as_posix()
-            except ValueError:
+    count = 0
+    vault_dir = draft_root / VAULT_DIR
+    if vault_dir.is_dir():
+        count += _add_repo_to_writer(writer, VAULT_DIR, vault_dir)
+    sources_dir = draft_root / DOC_SOURCES_DIR
+    if sources_dir.is_dir():
+        for repo_dir in sorted(sources_dir.iterdir()):
+            if not repo_dir.is_dir() or repo_dir.name.startswith("."):
                 continue
-            try:
-                content = f.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            writer.add_document(repo=repo_dir.name, path=path_str, content=content)
-            count += 1
+            count += _add_repo_to_writer(writer, repo_dir.name, repo_dir)
     writer.commit()
     return count
 

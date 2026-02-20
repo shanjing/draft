@@ -24,6 +24,20 @@ printf "${N}\n"
 # Current working directory (path only, no "CWD" label)
 printf '  %s\n' "${PWD:-$(pwd)}"
 
+# Current LLM (from .env)
+_LLM_LINE="[unset]"
+_ENV_FILE="${_DRAFT_PROJECT_ROOT}/.env"
+if [ -f "$_ENV_FILE" ]; then
+  _p=$(grep -E '^[[:space:]]*DRAFT_LLM_PROVIDER[[:space:]]*=' "$_ENV_FILE" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+  _m=$(grep -E '^[[:space:]]*OLLAMA_MODEL[[:space:]]*=' "$_ENV_FILE" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+  [ -z "$_m" ] && _m=$(grep -E '^[[:space:]]*LOCAL_AI_MODEL[[:space:]]*=' "$_ENV_FILE" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+  [ -z "$_m" ] && _m=$(grep -E '^[[:space:]]*DRAFT_LLM_MODEL[[:space:]]*=' "$_ENV_FILE" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+  [ -z "$_m" ] && _m=$(grep -E '^[[:space:]]*CLOUD_AI_MODEL[[:space:]]*=' "$_ENV_FILE" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+  [ -n "$_p" ] || [ -n "$_m" ] && _LLM_LINE="${_p:-ollama} / ${_m:-?}"
+fi
+printf '  LLM : %s\n' "$_LLM_LINE"
+unset _ENV_FILE _p _m _LLM_LINE
+
 # Tracked sources from sources.yaml: [ github/name | local directory/name ]
 _SOURCES_YAML="${_DRAFT_PROJECT_ROOT}/sources.yaml"
 if [ -f "$_SOURCES_YAML" ]; then
