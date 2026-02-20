@@ -5,7 +5,7 @@ Strict "answer only from context" prompting. Returns streamed text + citations.
 import os
 from pathlib import Path
 
-from lib.ingest import VECTOR_DIR, COLLECTION_NAME, EMBED_MODEL  # noqa: F401 - EMBED_MODEL used by _get_embedding_model
+from lib.ingest import VECTOR_DIR, COLLECTION_NAME, EMBED_MODEL, TRUST_REMOTE_CODE  # noqa: F401
 
 
 def _env_strip(key: str, default: str = "") -> str:
@@ -34,7 +34,7 @@ SYSTEM_PROMPT = """You are a direct, precise assistant. Answer only using the pr
 
 def _get_embedding_model():
     from sentence_transformers import SentenceTransformer
-    return SentenceTransformer(EMBED_MODEL)
+    return SentenceTransformer(EMBED_MODEL, trust_remote_code=TRUST_REMOTE_CODE)
 
 
 def _get_collection(draft_root: Path):

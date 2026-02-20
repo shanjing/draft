@@ -23,7 +23,8 @@ A RAG-based “Sam Rogers” style assistant over your private draft docs: sharp
                              │ sync .md
                              ▼
                     ┌─────────────────┐
-                    │  draft/<repo>/  │
+                    │  draft/.doc_    │
+                    │  sources/<repo>  │
                     │  *.md files     │
                     └────────┬────────┘
                              │
@@ -63,7 +64,7 @@ A RAG-based “Sam Rogers” style assistant over your private draft docs: sharp
 
 ### Scope
 
-Turn the existing `draft/<repo>/*.md` corpus into a queryable vector index without changing how files are synced.
+Turn the existing `draft/.doc_sources/<repo>/*.md` corpus into a queryable vector index without changing how files are synced.
 
 ### Chunking
 
@@ -89,11 +90,11 @@ Store the exact chunk text in the index (or a stable reference) so retrieval can
 
 - **Do not** extend `pull.py` with embedding logic. Keep pull as sync-only.
 - Add a **separate ingestion step** (e.g. `scripts/index_for_ai.py` or a small `lib/ingest.py`):
-  - Reads from the same `draft/<repo>/` layout.
+  - Reads from the same `draft/.doc_sources/<repo>/` layout.
   - Applies the same logical “which files to include” as the rest of draft (e.g. exclude top-level README, CLAUDE.md, etc. if desired).
   - Chunks → embeds → writes to the vector store.
 - **Trigger**: Run after pull (e.g. from UI “Pull” success callback, or manually). Optionally: “Reindex for AI” in the UI that calls this step.
-- **Idempotency**: Rebuild the index from scratch on each run (or support clear + re-add) so the store always reflects current `draft/` contents.
+- **Idempotency**: Rebuild the index from scratch on each run (or support clear + re-add) so the store always reflects current `draft/.doc_sources/` contents.
 
 ---
 
@@ -184,7 +185,7 @@ Store the exact chunk text in the index (or a stable reference) so retrieval can
 
 ## Is Draft ready to use?
 
-- **Without AI (no local LLM):** Yes. The document index UI (tree, doc viewer, Pull, Add source, full-text Whoosh search) works. Run `./setup.sh` then `python scripts/serve.py`; open http://localhost:8058.
+- **Without AI (no local LLM):** Yes. The  UI (tree, doc viewer, Pull, Add source, full-text Whoosh search) works. Run `./setup.sh` then `python scripts/serve.py`; open http://localhost:8058.
 - **With Ask (AI) — needs two things:**
   1. **AI index:** Run `python scripts/index_for_ai.py` once (and after Pull). Requires **Python 3.11 or 3.12**; ChromaDB does not support Python 3.14+ yet. The script downloads the embedding model (nomic-embed-text) on first run.
   2. **LLM:** Either set **ANTHROPIC_API_KEY** (Claude) or run **Ollama** locally. For Ollama, the default model is **qwen3:8b**. Pull it once: `ollama run qwen3:8b`. Override with env: `OLLAMA_MODEL=qwen2.5-coder:32b` (or another model).

@@ -1,9 +1,13 @@
 repos:
+  vault:
+    source: ./.doc_sources/vault
   shanjing_adk-lab:
     source: https://github.com/shanjing/adk-lab
   MarginCall:
-    source: ./MarginCall
+    source: ./.doc_sources/MarginCall
   google_adk-python:
     source: https://github.com/google/adk-python
   ginobefun_agentic-design-patterns-cn:
     source: https://github.com/ginobefun/agentic-design-patterns-cn
+  X:
+    source: ../X

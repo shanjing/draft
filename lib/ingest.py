@@ -20,11 +20,13 @@ EXCLUDE_DIRS = (
     ".adk",
 )
 
+DOC_SOURCES_DIR = ".doc_sources"
 VECTOR_DIR = ".vector_store"
 COLLECTION_NAME = "draft_docs"
 
-# all-MiniLM-L6-v2: no trust_remote_code, fast. Or set to "nomic-ai/nomic-embed-text-v1.5" and pass trust_remote_code=True.
-EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+# nomic-embed-text-v1.5 requires trust_remote_code=True. Alternative: "sentence-transformers/all-MiniLM-L6-v2" (no trust_remote_code).
+EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
+TRUST_REMOTE_CODE = True
 
 
 def should_include(rel_path: str) -> bool:
@@ -39,9 +41,12 @@ def should_include(rel_path: str) -> bool:
 
 
 def collect_chunks(draft_root: Path) -> list[Chunk]:
-    """Collect all chunks from draft/<repo>/*.md using same exclusions as pull."""
+    """Collect all chunks from draft/.doc_sources/<repo>/*.md using same exclusions as pull."""
     chunks: list[Chunk] = []
-    for repo_dir in sorted(draft_root.iterdir()):
+    sources_dir = draft_root / DOC_SOURCES_DIR
+    if not sources_dir.is_dir():
+        return chunks
+    for repo_dir in sorted(sources_dir.iterdir()):
         if not repo_dir.is_dir() or repo_dir.name.startswith("."):
             continue
         repo = repo_dir.name
@@ -96,7 +101,7 @@ def build_index(draft_root: Path, verbose: bool = False) -> int:
 
     if verbose:
         print(f"Embedding {len(chunks)} chunks with {EMBED_MODEL}...")
-    model = SentenceTransformer(EMBED_MODEL)
+    model = SentenceTransformer(EMBED_MODEL, trust_remote_code=TRUST_REMOTE_CODE)
     texts = [c.text for c in chunks]
     embeddings = model.encode(texts, show_progress_bar=verbose)
 

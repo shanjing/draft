@@ -1,2 +1,0 @@
-##ADK related tests, POCs##
-

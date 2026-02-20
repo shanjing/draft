@@ -30,6 +30,10 @@ Open **http://localhost:8058**. The image includes `sources.yaml` and all repo s
 docker run -p 8058:8058 -v "$(pwd)":/app draft-ui
 ```
 
+## Data directory (`.doc_sources`)
+
+Document sources live under **`.doc_sources/`** (one subdir per repo). It is **not a hard requirement** to have `.doc_sources` in the git repo. You can keep it detached from the codebase—e.g. on an encrypted local disk or synced from remote cloud—and the app will read from it at runtime. To keep it out of version control, add `.doc_sources/` to `.gitignore`.
+
 ## sources.yaml
 
 Lists the repos (sources) that draft tracks. Each entry is a subdirectory name and a `source`:
@@ -56,6 +60,24 @@ The **Ask (AI)** panel (top of the content area) answers questions using only yo
    - **Cloud:** Set **ANTHROPIC_API_KEY**; Ask (AI) then uses Claude instead of Ollama. Easiest: copy `.env.example` to `.env` and add `ANTHROPIC_API_KEY=sk-...` (the app loads `.env` when started with `python scripts/serve.py`).
 
 No local LLM is needed for the rest of Draft (tree, search, pull, add source). See `docs/local-oracle-design.md` for details.
+
+## Vault
+
+The **vault** source (`./.doc_sources/vault`) can ship with the repo as the default doc set (e.g. `DRAFT.md`). It is listed in `sources.yaml` by default so it appears in the tree and can be searched and queried via Ask (AI) after indexing. If you keep `.doc_sources` out of git (see above), populate or sync it separately.
+
+## Tests
+
+```bash
+source .venv/bin/activate
+pytest tests/ -v
+```
+
+- **test_ask.py**: Ask API (POST /api/ask, SSE stream), LLM status.
+- **test_search.py**: Search API, tree (includes vault).
+- **test_components.py**: Chunking, ingest (build_index), ai_engine (retrieve, _env_strip).
+- **tests/test_ask_curl.sh**: Manual curl test against a running server; run with `bash tests/test_ask_curl.sh [BASE_URL]`.
+
+Integration test against a live server: `pytest tests/test_integration_curl.py -m integration` (server must be running on 8058).
 
 ## Adding Document Sources
 
