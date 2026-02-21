@@ -1,16 +1,15 @@
-# Managed document sources. Edit by hand or add via UI / pull.py -a.
-# After adding or editing an entry, run:  python scripts/verify_sources.py
-# Use --check-paths to warn if vault or repo dirs do not exist yet.
+# Source of truth for all doc sources. Vault and normal repos.
+# - vault: local append-only store at DRAFT_HOME/vault (~/.draft/vault). source is path relative to DRAFT_HOME.
+# - Other entries: pulled from source (path or GitHub URL) into DRAFT_HOME/.doc_sources/<name>/.
 repos:
   vault:
     source: ./vault
-  shanjing_adk-lab:
-    source: https://github.com/shanjing/adk-lab
   MarginCall:
-    source: ./.doc_sources/MarginCall
-  google_adk-python:
-    source: https://github.com/google/adk-python
-  ginobefun_agentic-design-patterns-cn:
-    source: https://github.com/ginobefun/agentic-design-patterns-cn
-  X:
-    source: ../X
+    source: ../MarginCall
+    url: https://github.com/shanjing/MarginCall.git
+  adk-python:
+    source: /Users/shan/workspace/adk-python
+    url: https://github.com/google/adk-python
+  draft:
+    source: /Users/shan/workspace/draft
+    url: https://github.com/shanjing/draft

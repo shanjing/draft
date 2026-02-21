@@ -30,9 +30,11 @@ Open **http://localhost:8058**. The image includes `sources.yaml` and all repo s
 docker run -p 8058:8058 -v "$(pwd)":/app draft-ui
 ```
 
-## Data directory (`.doc_sources`)
+## Data directory (`~/.draft`)
 
-Document sources live under **`.doc_sources/`** (one subdir per repo). It is **not a hard requirement** to have `.doc_sources` in the git repo. You can keep it detached from the codebase—e.g. on an encrypted local disk or synced from remote cloud—and the app will read from it at runtime. To keep it out of version control, add `.doc_sources/` to `.gitignore`.
+Document data lives under **`~/.draft/`** (or **`DRAFT_HOME`** if set): **`.doc_sources/`** (one subdir per pulled repo) and **`vault/`** (curated docs). The repo holds only code and `sources.yaml`; the app reads and writes vault and pulled docs under `~/.draft/` at runtime. To use a different data root, set the **`DRAFT_HOME`** environment variable.
+
+**Migration:** If you previously had `.doc_sources/` or `vault/` in the repo root, move them into `~/.draft/`: e.g. `mkdir -p ~/.draft && mv .doc_sources vault ~/.draft/`.
 
 ## sources.yaml
 
@@ -63,7 +65,7 @@ No local LLM is needed for the rest of Draft (tree, search, pull, add source). S
 
 ## Vault
 
-The **vault** source (`./vault`) lives **outside** `.doc_sources/` so it can later be pointed at encrypted S3, iCloud, etc. It ships with the repo as the default doc set (e.g. `DRAFT.md`) and is listed in `sources.yaml` so it appears in the tree and can be searched and queried via Ask (AI) after indexing.
+The **vault** source lives at **`~/.draft/vault/`** (or `$DRAFT_HOME/vault/`). It is separate from `.doc_sources/` so it can later be pointed at encrypted S3, iCloud, etc. Add `DRAFT.md` and other curated docs there; list `vault` in `sources.yaml` with `source: ./vault` so it appears in the tree and can be searched and queried via Ask (AI) after indexing.
 
 ## Tests
 

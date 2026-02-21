@@ -23,7 +23,7 @@ A RAG-based “Sam Rogers” style assistant over your private draft docs: sharp
                              │ sync .md
                              ▼
                     ┌─────────────────┐
-                    │  draft/.doc_    │
+                    │  ~/.draft/.doc_ │
                     │  sources/<repo>  │
                     │  *.md files     │
                     └────────┬────────┘
@@ -64,7 +64,7 @@ A RAG-based “Sam Rogers” style assistant over your private draft docs: sharp
 
 ### Scope
 
-Turn the existing `draft/.doc_sources/<repo>/*.md` corpus into a queryable vector index without changing how files are synced.
+Turn the existing `~/.draft/.doc_sources/<repo>/*.md` corpus into a queryable vector index without changing how files are synced.
 
 ### Chunking
 
@@ -90,11 +90,11 @@ Store the exact chunk text in the index (or a stable reference) so retrieval can
 
 - **Do not** extend `pull.py` with embedding logic. Keep pull as sync-only.
 - Add a **separate ingestion step** (e.g. `scripts/index_for_ai.py` or a small `lib/ingest.py`):
-  - Reads from the same `draft/.doc_sources/<repo>/` layout.
+  - Reads from the same `~/.draft/.doc_sources/<repo>/` layout.
   - Applies the same logical “which files to include” as the rest of draft (e.g. exclude top-level README, CLAUDE.md, etc. if desired).
   - Chunks → embeds → writes to the vector store.
 - **Trigger**: Run after pull (e.g. from UI “Pull” success callback, or manually). Optionally: “Reindex for AI” in the UI that calls this step.
-- **Idempotency**: Rebuild the index from scratch on each run (or support clear + re-add) so the store always reflects current `draft/.doc_sources/` contents.
+- **Idempotency**: Rebuild the index from scratch on each run (or support clear + re-add) so the store always reflects current `~/.draft/.doc_sources/` contents.
 
 ---
 

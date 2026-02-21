@@ -79,14 +79,24 @@ def test_verify_check_paths_warns_missing(tmp_path):
 
 
 def test_verify_check_paths_no_warn_when_exists(tmp_path):
+    """Vault and .doc_sources are under DRAFT_HOME; set it so vault path exists."""
+    import os
     (tmp_path / "vault").mkdir(parents=True)
     path = tmp_path / "sources.yaml"
     path.write_text("repos:\n  vault:\n    source: ./vault\n")
-    ok, errors, warnings = verify_sources_yaml(
-        path, draft_root=tmp_path, check_paths=True
-    )
-    assert ok is True
-    assert not any("vault" in w and "not found" in w.lower() for w in warnings)
+    prev = os.environ.get("DRAFT_HOME")
+    os.environ["DRAFT_HOME"] = str(tmp_path)
+    try:
+        ok, errors, warnings = verify_sources_yaml(
+            path, draft_root=tmp_path, check_paths=True
+        )
+        assert ok is True
+        assert not any("vault" in w and "not found" in w.lower() for w in warnings)
+    finally:
+        if prev is None:
+            os.environ.pop("DRAFT_HOME", None)
+        else:
+            os.environ["DRAFT_HOME"] = prev
 
 
 def test_cli_exit_0_on_valid(draft_root):

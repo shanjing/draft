@@ -33,11 +33,20 @@ SYSTEM_PROMPT = """You are a direct, precise assistant. Answer only using the pr
 
 
 def _get_embedding_model():
+    try:
+        import numpy as np
+        major = int(np.__version__.split(".")[0])
+        if major >= 2:
+            raise RuntimeError("NumPy 2.x not compatible. Run: pip install 'numpy<2'")
+    except ImportError:
+        pass
     from sentence_transformers import SentenceTransformer
     return SentenceTransformer(EMBED_MODEL, trust_remote_code=TRUST_REMOTE_CODE)
 
 
 def _get_collection(draft_root: Path):
+    os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+    import numpy as np  # Chroma/DuckDB expect numpy to be available; load before chromadb
     import chromadb
     from chromadb.config import Settings
     persist_dir = draft_root / VECTOR_DIR

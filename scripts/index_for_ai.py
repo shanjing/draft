@@ -7,6 +7,9 @@ import os
 import sys
 from pathlib import Path
 
+# Disable Chroma telemetry before any chromadb import
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
 # Draft repo root = parent of scripts/
 SCRIPT_DIR = Path(__file__).resolve().parent
 DRAFT_ROOT = SCRIPT_DIR.parent

@@ -3,19 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Draft — Your intelligence, vaulted.</title>
+  <title>Draft — Your private AI document server</title>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&icon_names=home,search,sync,unfold_less,unfold_more,push_pin,expand_more&display=block" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
 </head>
 <body>
   <header class="header">
     <div class="header-left">
       <button type="button" id="btn-home" class="btn btn-icon" title="Home"><span class="material-symbols-outlined" aria-hidden="true">home</span></button>
-      <h1>Draft</h1>
-      <p class="tagline"><span class="prompt">$</span> Your intelligence, vaulted.</p>
+      <div class="header-title-block">
+        <h1>Draft</h1>
+        <p class="tagline">Your private AI document server</p>
+        <button type="button" id="theme-switch" class="theme-switch" role="switch" aria-label="Toggle bright theme" title="Night / Bright"><span class="theme-switch-thumb"></span></button>
+      </div>
     </div>
     <div class="header-right search-wrap">
       <input type="search" id="search-input" class="search-input hidden" placeholder="Search documents (full text)…" aria-label="Search documents">

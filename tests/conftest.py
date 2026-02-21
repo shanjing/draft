@@ -1,4 +1,5 @@
 """Pytest fixtures for Draft tests."""
+import os
 import sys
 from pathlib import Path
 
@@ -12,13 +13,27 @@ if str(REPO_ROOT) not in sys.path:
 
 @pytest.fixture
 def draft_root():
-    """Draft repo root (has vault/, sources.yaml, etc.)."""
+    """Draft repo root (has sources.yaml, etc.)."""
     return REPO_ROOT
 
 
 @pytest.fixture
-def client(draft_root):
-    """FastAPI TestClient for the Draft app. Runs in-process; uses draft_root from app."""
+def draft_home(tmp_path):
+    """DRAFT_HOME for tests: tmp path with vault/ and optional .doc_sources."""
+    (tmp_path / "vault").mkdir(parents=True)
+    (tmp_path / "vault" / "DRAFT.md").write_text("# Draft\n\nDraft is a document mirror and RAG assistant.\n")
+    prev = os.environ.get("DRAFT_HOME")
+    os.environ["DRAFT_HOME"] = str(tmp_path)
+    yield tmp_path
+    if prev is None:
+        os.environ.pop("DRAFT_HOME", None)
+    else:
+        os.environ["DRAFT_HOME"] = prev
+
+
+@pytest.fixture
+def client(draft_root, draft_home):
+    """FastAPI TestClient for the Draft app. Uses draft_home for vault/.doc_sources."""
     from fastapi.testclient import TestClient
     from ui.app import app
     return TestClient(app)
@@ -26,7 +41,13 @@ def client(draft_root):
 
 @pytest.fixture
 def temp_draft_root(tmp_path):
-    """Temporary draft root with vault/ (for ingest/chunk tests)."""
+    """Temporary DRAFT_HOME with vault/ (for ingest/chunk tests)."""
     (tmp_path / "vault").mkdir(parents=True)
     (tmp_path / "vault" / "DRAFT.md").write_text("# Draft\n\nDraft is a document mirror and RAG assistant.\n")
-    return tmp_path
+    prev = os.environ.get("DRAFT_HOME")
+    os.environ["DRAFT_HOME"] = str(tmp_path)
+    yield tmp_path
+    if prev is None:
+        os.environ.pop("DRAFT_HOME", None)
+    else:
+        os.environ["DRAFT_HOME"] = prev

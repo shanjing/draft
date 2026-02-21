@@ -35,6 +35,13 @@ EXCLUDE_DIRS = (
 DOC_SOURCES_DIR = ".doc_sources"
 VAULT_DIR = "vault"
 
+# Doc sources and vault live under DRAFT_HOME (~/.draft)
+try:
+    from lib.paths import get_doc_sources_root
+except ImportError:
+    def get_doc_sources_root() -> Path:
+        return Path.home() / ".draft" / DOC_SOURCES_DIR
+
 
 def parse_repos_yaml(path: Path) -> dict[str, dict]:
     """Parse sources.yaml: { name: {"source": str, "url": str | None} }."""
@@ -358,7 +365,8 @@ def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
         return
 
     click.echo("Pull started.")
-    (draft_root / DOC_SOURCES_DIR).mkdir(parents=True, exist_ok=True)
+    doc_sources_root = get_doc_sources_root()
+    doc_sources_root.mkdir(parents=True, exist_ok=True)
     for name, repo in repos.items():
         if name == VAULT_DIR:
             continue  # Vault lives outside .doc_sources (e.g. ./vault); can later be S3/iCloud
@@ -386,7 +394,7 @@ def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
                 click.echo()
             updated = 0
             for rel_str, content in files:
-                dest = draft_root / DOC_SOURCES_DIR / name / rel_str
+                dest = doc_sources_root / name / rel_str
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(content)
                 if not quiet:
@@ -439,7 +447,7 @@ def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
         updated = 0
         for rel_str in paths:
             f = source_root / rel_str
-            dest = draft_root / DOC_SOURCES_DIR / name / rel_str
+            dest = doc_sources_root / name / rel_str
             dest.parent.mkdir(parents=True, exist_ok=True)
             if not dest.exists() or f.stat().st_mtime > dest.stat().st_mtime:
                 shutil.copy2(f, dest)

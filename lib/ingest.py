@@ -1,10 +1,11 @@
 """
-Ingest draft/<repo>/*.md into a Chroma vector store for RAG.
+Ingest vault and .doc_sources (under ~/.draft) into a Chroma vector store for RAG.
 Uses same file exclusions as scripts/pull.py. Rebuilds the collection on each run.
 """
 from pathlib import Path
 
 from lib.chunking import chunk_markdown, Chunk
+from lib.paths import get_doc_sources_root, get_vault_root
 
 # Same exclusions as pull.py (do not depend on scripts)
 EXCLUDE_TOPLEVEL = {"README.md"}
@@ -20,8 +21,6 @@ EXCLUDE_DIRS = (
     ".adk",
 )
 
-DOC_SOURCES_DIR = ".doc_sources"
-VAULT_DIR = "vault"
 VECTOR_DIR = ".vector_store"
 COLLECTION_NAME = "draft_docs"
 
@@ -42,10 +41,9 @@ def should_include(rel_path: str) -> bool:
 
 
 def collect_chunks(draft_root: Path) -> list[Chunk]:
-    """Collect chunks from vault/ and draft/.doc_sources/<repo>/*.md (same exclusions as pull)."""
+    """Collect chunks from ~/.draft/vault and ~/.draft/.doc_sources/<repo>/*.md (same exclusions as pull)."""
     chunks: list[Chunk] = []
-    # Vault: separate from .doc_sources (can later point to S3/iCloud etc.)
-    vault_dir = draft_root / VAULT_DIR
+    vault_dir = get_vault_root()
     if vault_dir.is_dir():
         for f in vault_dir.rglob("*.md"):
             try:
@@ -59,10 +57,9 @@ def collect_chunks(draft_root: Path) -> list[Chunk]:
                 content = f.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            for c in chunk_markdown(VAULT_DIR, path_str, content):
+            for c in chunk_markdown("vault", path_str, content):
                 chunks.append(c)
-    # .doc_sources: filesystem for pulled sources only
-    sources_dir = draft_root / DOC_SOURCES_DIR
+    sources_dir = get_doc_sources_root()
     if not sources_dir.is_dir():
         return chunks
     for repo_dir in sorted(sources_dir.iterdir()):
@@ -91,6 +88,14 @@ def build_index(draft_root: Path, verbose: bool = False) -> int:
     Rebuild the Chroma vector store from draft/<repo>/*.md.
     Returns the number of chunks indexed.
     """
+    import os
+    os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+    try:
+        import numpy as np
+        if int(np.__version__.split(".")[0]) >= 2:
+            raise RuntimeError("NumPy 2.x not compatible. Run: pip install 'numpy<2'")
+    except ImportError:
+        pass
     import chromadb
     from chromadb.config import Settings
     from sentence_transformers import SentenceTransformer
@@ -134,12 +139,20 @@ def build_index(draft_root: Path, verbose: bool = False) -> int:
         for c in chunks
     ]
     documents = [c.text for c in chunks]
-    collection.add(
-        ids=ids,
-        embeddings=embeddings.tolist(),
-        metadatas=metadatas,
-        documents=documents,
-    )
+
+    # Add in batches to avoid "Invalid buffer size" / DuckDB memory limits.
+    BATCH_SIZE = 4000
+    for start in range(0, len(chunks), BATCH_SIZE):
+        end = min(start + BATCH_SIZE, len(chunks))
+        collection.add(
+            ids=ids[start:end],
+            embeddings=embeddings[start:end].tolist(),
+            metadatas=metadatas[start:end],
+            documents=documents[start:end],
+        )
+        if verbose and end < len(chunks):
+            print(f"  Added {end}/{len(chunks)} chunks...")
+
     if verbose:
         print(f"Indexed {len(chunks)} chunks into {persist_dir}")
     return len(chunks)

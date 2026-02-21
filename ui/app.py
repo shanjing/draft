@@ -2,18 +2,32 @@
 Draft UI: serve document tree and markdown content. Launch with uvicorn.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse, StreamingResponse
+# Disable Chroma telemetry before any chromadb import (avoids "capture() takes 1 positional argument" error)
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 DRAFT_ROOT = Path(__file__).resolve().parent.parent
 DOC_SOURCES_DIR = ".doc_sources"
 VAULT_DIR = "vault"
+
+# Global allowed document types (tree + doc viewer). Capped at 5.
+ALLOWED_DOC_EXTENSIONS = (".md", ".txt", ".pdf", ".doc", ".docx")
+DOC_CONTENT_TYPES = {
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 if str(DRAFT_ROOT) not in sys.path:
     sys.path.insert(0, str(DRAFT_ROOT))
 
@@ -25,6 +39,8 @@ except ImportError:
     pass
 
 from lib.log import logger, configure as configure_log
+from lib.paths import get_doc_sources_root, get_vault_root, ensure_vault_ready
+
 configure_log()
 
 
@@ -83,12 +99,35 @@ def _paths_to_tree_node(paths: list[str]) -> dict:
 
 
 def _doc_sources_root() -> Path:
-    """Root for repo dirs: .doc_sources if present, else draft root (legacy)."""
-    doc_sources = DRAFT_ROOT / DOC_SOURCES_DIR
-    return doc_sources if doc_sources.is_dir() else DRAFT_ROOT
+    """Root for repo dirs: ~/.draft/.doc_sources (or DRAFT_HOME)."""
+    return get_doc_sources_root()
+
+
+def _repo_tree_entry(name: str, repo_dir: Path, url: str | None = None) -> dict:
+    """Build one repo entry: name, url, tree (children). Uses global ALLOWED_DOC_EXTENSIONS."""
+    paths = []
+    for f in repo_dir.rglob("*"):
+        if f.is_file() and f.suffix.lower() in ALLOWED_DOC_EXTENSIONS:
+            try:
+                rel = f.relative_to(repo_dir)
+                paths.append(rel.as_posix())
+            except ValueError:
+                continue
+    tree = _paths_to_tree_node(paths)
+    return {"name": name, "url": url, "tree": tree["children"]}
+
+
+def _resolve_repo_dir(name: str, source: str) -> Path | None:
+    """Resolve repo directory from sources.yaml entry. Vault: DRAFT_HOME/vault; others: .doc_sources/name."""
+    if name == VAULT_DIR:
+        ensure_vault_ready()
+        return get_vault_root()
+    # Normal source: stored under .doc_sources/<name>/
+    return _doc_sources_root() / name
 
 
 def get_tree() -> list:
+    """Build tree from sources.yaml (source of truth). Vault first, then others in yaml order."""
     sources_yaml = DRAFT_ROOT / "sources.yaml"
     if not sources_yaml.is_file():
         return []
@@ -96,29 +135,26 @@ def get_tree() -> list:
     doc_sources = _doc_sources_root()
     result = []
     for name in repos:
-        if name == VAULT_DIR:
-            repo_dir = DRAFT_ROOT / VAULT_DIR
-        else:
-            repo_dir = doc_sources / name
+        repo_dir = _resolve_repo_dir(name, repos[name]["source"])
+        if repo_dir is None:
+            continue
         if not repo_dir.is_dir():
             continue
-        paths = []
-        for f in repo_dir.rglob("*.md"):
-            try:
-                rel = f.relative_to(repo_dir)
-                paths.append(rel.as_posix())
-            except ValueError:
-                continue
-        tree = _paths_to_tree_node(paths)
-        result.append({
-            "name": name,
-            "url": repos[name].get("url"),
-            "tree": tree["children"],
-        })
+        result.append(_repo_tree_entry(name, repo_dir, repos[name].get("url")))
+    # Keep vault first if present
+    vault_idx = next((i for i, r in enumerate(result) if r["name"] == VAULT_DIR), -1)
+    if vault_idx > 0:
+        result.insert(0, result.pop(vault_idx))
     return result
 
 
 app = FastAPI(title="Draft", description="Browse draft documents")
+
+
+@app.on_event("startup")
+def _startup():
+    ensure_vault_ready()
+
 
 try:
     from lib.manifest import update_manifest
@@ -245,7 +281,7 @@ def api_pull():
     logger.info("Pull requested")
     try:
         result = subprocess.run(
-            [sys.executable, str(DRAFT_ROOT / "scripts" / "pull.py"), "--quiet"],
+            [sys.executable, str(DRAFT_ROOT / "scripts" / "pull.py"), "-q"],
             cwd=str(DRAFT_ROOT),
             capture_output=True,
             text=True,
@@ -283,7 +319,7 @@ def api_add_source(body: AddSourceBody):
         if not source:
             return {"ok": False, "error": "Missing source.", "logs": []}
         result = subprocess.run(
-            [sys.executable, str(DRAFT_ROOT / "scripts" / "pull.py"), "-a", source, "--quiet"],
+            [sys.executable, str(DRAFT_ROOT / "scripts" / "pull.py"), "-a", source, "-q"],
             cwd=str(DRAFT_ROOT),
             capture_output=True,
             text=True,
@@ -310,12 +346,58 @@ def api_add_source(body: AddSourceBody):
         return {"ok": False, "error": str(e), "logs": [f"Error: {e}"]}
 
 
-@app.get("/api/doc/{repo}/{path:path}", response_class=PlainTextResponse)
+def _safe_vault_basename(name: str) -> str:
+    """Return a safe basename for vault (no path traversal, no empty)."""
+    base = Path(name).name.strip()
+    return base or "uploaded"
+
+
+def _vault_dest_path(vault_root: Path, name: str) -> Path:
+    """Choose a path under vault for an uploaded file. Append-only: never overwrite; use a numeric suffix if name exists."""
+    dest = vault_root / name
+    if not dest.exists():
+        return dest
+    stem = dest.stem
+    suffix = dest.suffix
+    n = 1
+    while True:
+        dest = vault_root / f"{stem}_{n}{suffix}"
+        if not dest.exists():
+            return dest
+        n += 1
+
+
+@app.post("/api/vault/upload")
+async def api_vault_upload(files: list[UploadFile] = File(default=[])):
+    """Copy uploaded files into ~/.draft/vault (or DRAFT_HOME/vault). Vault is append-only: no delete; existing names get a numeric suffix."""
+    if not files:
+        return {"ok": False, "error": "No files uploaded.", "saved": []}
+    vault_root = get_vault_root()
+    vault_root.mkdir(parents=True, exist_ok=True)
+    saved = []
+    errors = []
+    for uf in files:
+        name = _safe_vault_basename(uf.filename or "uploaded")
+        if not name:
+            continue
+        dest = _vault_dest_path(vault_root, name)
+        try:
+            content = await uf.read()
+            dest.write_bytes(content)
+            saved.append(dest.name)
+        except Exception as e:
+            errors.append(f"{name}: {e}")
+    if errors and not saved:
+        return {"ok": False, "error": "; ".join(errors), "saved": []}
+    return {"ok": True, "saved": saved, "error": "; ".join(errors) if errors else None}
+
+
+@app.get("/api/doc/{repo}/{path:path}")
 def api_doc(repo: str, path: str):
     if ".." in path or path.startswith("/"):
         raise HTTPException(status_code=400, detail="Invalid path")
     if repo == VAULT_DIR:
-        repo_root = DRAFT_ROOT / VAULT_DIR
+        repo_root = get_vault_root()
     else:
         repo_root = _doc_sources_root() / repo
     full = repo_root / path
@@ -324,10 +406,18 @@ def api_doc(repo: str, path: str):
         full.relative_to(repo_root.resolve())
     except (ValueError, OSError):
         raise HTTPException(status_code=404, detail="Not found")
-    if not full.is_file() or full.suffix.lower() != ".md":
+    suffix = full.suffix.lower()
+    if not full.is_file() or suffix not in ALLOWED_DOC_EXTENSIONS:
         raise HTTPException(status_code=404, detail="Not found")
+    media_type = DOC_CONTENT_TYPES.get(suffix, "application/octet-stream")
     try:
-        return full.read_text(encoding="utf-8", errors="replace")
+        if suffix in (".md", ".txt"):
+            return PlainTextResponse(
+                full.read_text(encoding="utf-8", errors="replace"),
+                media_type=media_type,
+            )
+        content = full.read_bytes()
+        return Response(content=content, media_type=media_type)
     except OSError:
         raise HTTPException(status_code=404, detail="Not found")
 

@@ -1,8 +1,16 @@
 # Storage & Metadata Design: Access Layer and Reconnection
 
-**Scope:** Storage layer + access layer. Intelligence layer (embeddings, Chroma, LLM) is out of scope for this design. Goal: **re-connect with storage after it is detached** using content identity (hashing) and path mapping; support future browser-drop with URL as source.
+**Scope:** Storage layer + access layer. 
 
-**copy/sync source files into `.doc_sources/<source_id>/`** for all non-vault sources (pull from GitHub, copy from local paths). **Vault** lives in `vault/` at draft root (outside `.doc_sources/`). The tree, search, and Ask read vault from `vault/` and other docs from `.doc_sources/`. This design **adds a meta layer on top**—manifest, file registry, content hashing—for reconnection and portability; it does not replace the existing "sync into .doc_sources" flow.
+**Goal:** re-connect with storage after it is detached using content identity (hashing) and path mapping; support future browser-drop with URL as source.
+
+**Data locations:** Doc data lives under **`~/.draft/`** (or **`DRAFT_HOME`**): **`.doc_sources/<source_id>/`** for pulled sources and **`vault/`** for the vault. The repo root holds code and `sources.yaml` only.
+
+**copy/sync source files into `~/.draft/.doc_sources/<source_id>/`** for all non-vault sources (pull from GitHub, copy from local paths).
+
+**Vault** lives in **`~/.draft/vault/`** (outside `.doc_sources/`). 
+
+**metadata layer:** The tree, search, and Ask read vault from `~/.draft/vault/` and other docs from `~/.draft/.doc_sources/`. This design **adds a meta layer on top**—manifest, file registry, content hashing—for reconnection and portability; it works along with the existing "sync into .doc_sources" flow.
 
 ---
 
@@ -14,6 +22,7 @@ flowchart TB
     setup["setup.sh\n(Add sources)"]
     cli["CLI: pull.py -a\n(path or GitHub URL)"]
     ui["UI: Add source box\n(POST /api/add_source)"]
+    vault_ui["UI: Vault drop zone\n(drag-and-drop or click)\nPOST /api/vault/upload"]
     drop["Future: File drop\n(Browser plugin → URL + content)"]
   end
 
@@ -24,7 +33,7 @@ flowchart TB
   end
 
   subgraph meta["Metadata layer"]
-    sources["sources.yaml\n(repos: name, source, url)"]
+    sources["sources.yaml\n(single source of truth:\nvault + repos, name, source, url)"]
     manifest["draft_config.json\n(manifest: source_id, paths, types)"]
     registry[".draft/file_registry.json\n(file → content_hash, path)"]
     sources --> manifest
@@ -35,10 +44,10 @@ flowchart TB
 
   subgraph storage["Storage layer"]
     external["External sources\n(local dir, GitHub, iCloud, SSD)"]
-    vault[("Vault\n(vault/ — later S3, iCloud)")]
-    docs[(".doc_sources/<source_id>/\n(filesystem, pulled .md)")]
+    vault[("Vault\n(~/.draft/vault/\nappend-only, no delete)")]
+    docs[("~/.draft/.doc_sources/<source_id>/\n(filesystem, pulled .md)")]
     external -->|"pull / copy"| docs
-    vault -.->|"separate"| pipeline
+    vault_ui -->|"upload"| vault
   end
 
   subgraph intel["Intelligence layer (existing)"]
@@ -53,6 +62,7 @@ flowchart TB
   setup --> pipeline
   cli --> pipeline
   ui --> api
+  vault_ui --> api
   drop -.->|"future"| api
 
   pipeline -->|"sync"| docs
@@ -67,21 +77,39 @@ flowchart TB
 
 **Legend:**
 
-- **Source input methods:** All feed into the same **standard add-source pipeline** (or will, once unified). File drop is future (browser plugin).
-- **Access layer:** FastAPI backend; runs the pipeline (config → pull → metadata → search → vector).
-- **Metadata layer:** `sources.yaml` (human-editable), `draft_config.json` (manifest for re-link), `.draft/file_registry.json` (file → content_hash). Updated by the pipeline when sources are added or paths change.
-- **Storage layer:** **Vault** lives outside `.doc_sources/` (e.g. `./vault` at draft root; later configurable to encrypted S3, iCloud, etc.). **.doc_sources/** is the filesystem for pulled sources only. Pull/copy fills `.doc_sources/<source_id>/`; Draft reads vault from `vault/` and other docs from `.doc_sources/`.
-- **Intelligence layer:** Whoosh (full-text) and Chroma (vectors) are rebuilt from `.doc_sources/` by the pipeline; LLM uses Chroma for Ask.
+- **Source input methods:** Add-source (setup, CLI, UI) feed the **standard add-source pipeline**. **Vault** has its own input: UI drop zone (drag-and-drop or click to choose) → `POST /api/vault/upload`. Future: browser plugin file drop.
+- **Access layer:** FastAPI backend; runs the pipeline (config → pull → metadata → search → vector) and serves vault upload.
+- **Metadata layer:** **`sources.yaml`** is the **single source of truth** for all sources (vault + repos): vault entry `source: ./vault`, others as before. `draft_config.json` (manifest) and `.draft/file_registry.json` (file → content_hash) are derived/updated by the pipeline.
+- **Storage layer:** **Vault** at **`~/.draft/vault/`** is **append-only** (no delete; duplicate filenames get a numeric suffix). **`~/.draft/.doc_sources/`** is for pulled sources only. Tree and doc viewer read vault and `.doc_sources/`; vault file list is **not** stored—it is **scanned on each** `GET /api/tree`.
+- **Intelligence layer:** Whoosh (full-text) and Chroma (vectors) are rebuilt from `~/.draft/.doc_sources/` and vault; LLM uses Chroma for Ask.
 
 ---
 
 ## 1. Principles
 
-- **Draft "watches" files** — it does not own them. Sources live on external drive, iCloud, GitHub, etc. Pull/copy still populates `.doc_sources/` with the resulting `.md` files.
+- **Draft "watches" files** — it does not own them. Sources live on external drive, iCloud, GitHub, etc. Pull/copy still populates `~/.draft/.doc_sources/` with the resulting `.md` files.
 - **Content identity over path** — we track files by a **content hash** (SHA-256). When the path changes (e.g. drive moved), we **re-link** existing vectors to the new path instead of re-indexing.
 - **Manifest is the single source of truth** for "what sources exist and where they map." It is portable and can live next to the vault or in a known location so the thin client can re-attach.
-- **Meta layer only** — Manifest, file registry, and hashes are additive. Reading and serving docs come from `vault/` (vault) and `.doc_sources/` (everything else); the meta layer enables re-link and future features without changing how files get there.
-- **Vault is separate** — Vault is not under `.doc_sources/`. It lives at `vault/` (or a configured path) so it can later be pointed at an encrypted S3 bucket, iCloud Drive, etc. `.doc_sources/` remains a plain filesystem for pulled/copied docs.
+- **Meta layer only** — Manifest, file registry, and hashes are additive. Reading and serving docs come from `~/.draft/vault/` and `~/.draft/.doc_sources/`; the meta layer enables re-link and future features without changing how files get there.
+- **Vault is separate** — Vault is not under `.doc_sources/`. It lives at **`~/.draft/vault/`** (or `DRAFT_HOME/vault/`) so it can later be pointed at an encrypted S3 bucket, iCloud Drive, etc. **`~/.draft/.doc_sources/`** remains a plain filesystem for pulled/copied docs.
+
+---
+
+### 1.1 Vault improvements (implemented)
+
+The following vault behavior is implemented and reflected in the diagram above.
+
+| Aspect | Behavior |
+|--------|----------|
+| **Source of truth** | **Vault is listed in `sources.yaml`** with `source: ./vault` (path relative to DRAFT_HOME). Same file defines vault and all other repos; tree and services resolve paths from it. |
+| **Adding files to vault** | **UI only:** Sidebar has a **vault drop zone** under the vault header. User can **drag-and-drop** files from the OS or **click** the zone to open a file picker. Both call `POST /api/vault/upload` (multipart `files`). No CLI “add file to vault” yet. |
+| **Append-only** | Vault is **append-only**: there is **no delete**. If an uploaded file has the same name as an existing one, the backend saves the new file with a **numeric suffix** (e.g. `doc_1.md`). |
+| **File list (index)** | **No separate index.** The list of files in the vault is **not** maintained in a DB or manifest. On each `GET /api/tree`, the server **scans** `~/.draft/vault/` (and other source dirs), filters by allowed doc extensions, and builds the tree. So the filesystem is the only source of truth for “what’s in the vault.” |
+| **Document types** | **Global allowed types** (tree + doc viewer): `.md`, `.txt`, `.pdf`, `.doc`, `.docx` (capped at five). Vault and all repos use the same list; tree and `/api/doc` only list/serve these. |
+| **UI collapse** | The vault block in the sidebar has a **collapse** control (arrow on the header). When collapsed, both the **drop zone** and the **file list** under vault are hidden; only the “vault” header row remains. |
+| **Tree order** | Vault is always **first** in the tree when present (sources.yaml is read, then result order is adjusted so vault is first). |
+
+**Diagram changes:** The architecture diagram now shows **sources.yaml** as the single source of truth for vault and repos, the **UI vault drop zone** as an input that uploads to vault via `POST /api/vault/upload`, and **vault** as append-only storage with no delete.
 
 ---
 
@@ -90,12 +118,12 @@ flowchart TB
 | Artifact | Location | Role |
 |----------|----------|------|
 | **Manifest** | `.draft/draft_config.json` at draft root | **Generated** from `sources.yaml` + resolved paths (see §2.1). **Implemented.** Verify required before build. Machine-readable; used for tooling; re-link will use it when file registry exists. |
-| **Sources list** | `sources.yaml` | **Single source of truth** for humans: list of repos (name, source, url). See §2.1 below. |
-| **Vault** | `vault/` (draft root, or configured path) | **Separate from .doc_sources.** Holds curated/private docs; can later be backed by encrypted S3, iCloud, etc. Not written by pull. |
-| **Doc store (filesystem)** | `.doc_sources/<source_id>/` | Pull/copy writes here (GitHub fetch, local copy). Vault is *not* here. The meta layer sits on top. |
+| **Sources list** | `sources.yaml` | **Single source of truth** for humans: list of **vault** (source: ./vault) and all repos (name, source, url). See §2.1 below. |
+| **Vault** | **`~/.draft/vault/`** (or `DRAFT_HOME/vault/`) | **Separate from .doc_sources.** Entry in `sources.yaml`; filled via UI drop/click → `POST /api/vault/upload`. Append-only; no delete. Can later be backed by S3, iCloud, etc. Not written by pull. |
+| **Doc store (filesystem)** | **`~/.draft/.doc_sources/<source_id>/`** | Pull/copy writes here (GitHub fetch, local copy). Vault is *not* here. The meta layer sits on top. |
 | **File registry** | `.draft/file_registry.json` (path in manifest) | **Not yet implemented.** Planned: list of known files with hash + source_id + relative path (for re-link). |
 | **Vector store** | `.vector_store/` (Chroma) | Stores chunk embeddings + metadata; chunk metadata includes `source_id`, `path`, and **content_hash** (see below). |
-| **Search index** | `.search_index/` (Whoosh) | Full-text index; can be rebuilt from `.doc_sources` if needed. |
+| **Search index** | `.search_index/` (Whoosh) | Full-text index; can be rebuilt from `~/.draft/.doc_sources` (and vault) if needed. |
 
 ---
 
@@ -108,7 +136,7 @@ flowchart TB
 - **`sources.yaml` is the only human-edited config.** People (and the UI/CLI add-source flow) add or change sources here. It stays minimal: repo name, `source` (path or URL), optional `url`.
 - **`draft_config.json` is always generated**, never hand-edited. The access layer (or a small job) produces it from:
   - **sources.yaml** (list of sources),
-  - **resolved paths** (e.g. resolve each `source` against draft root; for vault, use `vault/`),
+  - **resolved paths** (e.g. for vault use `~/.draft/vault/`; for pulled repos use `~/.draft/.doc_sources/<name>/`; for other local sources resolve against repo root),
   - optional **file registry** (hashes for re-link).
 
 So there is no “double sync”: **sources.yaml is canonical**; **draft_config.json is a derived cache**. Regenerate the manifest on pull/add-source, on startup, or when the user runs “Reconnect storage.” Each regeneration **replaces** the manifest entirely from the current YAML (no merge), so **dropped sources are trimmed automatically**—there is no separate prune step. No human ever edits `draft_config.json`. **Verification is mandatory before building the manifest:** `update_manifest()` runs `verify_sources_yaml()` first and raises if `sources.yaml` is invalid, so `draft_config.json` is never written from invalid config. Setup, UI add-source, and comments in `sources.yaml` tell users to run `python scripts/verify_sources.py` after editing by hand.
@@ -185,13 +213,13 @@ Chunk ID can stay `chunk_0`, `chunk_1`, etc.; we use `content_hash` + `path` + `
     "vault": {
       "source_type": "vault",
       "source": "./vault",
-      "resolved_path": "/absolute/path/to/draft/vault",
+      "resolved_path": "/home/user/.draft/vault",
       "url": null
     },
     "MarginCall": {
       "source_type": "local",
       "source": "./.doc_sources/MarginCall",
-      "resolved_path": "/absolute/path/to/draft/.doc_sources/MarginCall",
+      "resolved_path": "/home/user/.draft/.doc_sources/MarginCall",
       "url": "https://github.com/..."
     },
     "browser-drop-1": {
@@ -244,7 +272,7 @@ Chunk ID can stay `chunk_0`, `chunk_1`, etc.; we use `content_hash` + `path` + `
 1. **Load manifest** — Read `draft_config.json` (and optionally `sources.yaml`). Resolve each source’s current path (resolved_path or re-resolve from `source`).
 2. **Load file registry** — If present, load list of (source_id, path, content_hash).
 3. **Re-link (path changed)** — For each source with a new `resolved_path` (e.g. user updated after moving the drive): scan new path, hash each file. For each hash that exists in the registry under that source_id, treat as same file (path may have moved); update registry path if needed. Do **not** re-embed; Chroma already has chunks for that content_hash/source_id/path.
-4. **Serve** — Backend serves from current `resolved_path` and `.doc_sources`; vector store stays as-is unless new files appear (then incremental index by hash).
+4. **Serve** — Backend serves from current `resolved_path` (e.g. `~/.draft/vault`, `~/.draft/.doc_sources/<name>`); vector store stays as-is unless new files appear (then incremental index by hash).
 
 ---
 
@@ -275,14 +303,14 @@ So today: **sources.yaml** + **draft_config.json** (generated). Optional **file_
 |------|----------------|------------------|
 | User adds source (see 7.4) | `pull.py -a <arg>` runs (CLI or via API). | — |
 | `do_add_repo()` | Appends one block to **sources.yaml** (name + source + optional url). | **sources.yaml** ✓ |
-| `do_pull()` | Creates `.doc_sources/<name>/` and copies/fetches `.md` files (GitHub API or local copy). At end, **draft_config.json** is regenerated (verify then build). | **draft_config.json** ✓ |
-| Tree | Next load reads sources.yaml + `.doc_sources/` → new repo appears. | — |
+| `do_pull()` | Creates `~/.draft/.doc_sources/<name>/` and copies/fetches `.md` files (GitHub API or local copy). At end, **draft_config.json** is regenerated (verify then build). | **draft_config.json** ✓ |
+| Tree | Next load reads sources.yaml + `~/.draft/.doc_sources/` → new repo appears. | — |
 | Search (Whoosh) | **Not** updated by add_source. Updated only when user clicks **Pull** (api_pull rebuilds search index). | — |
 | Vector / Ask (Chroma) | **Not** updated by add_source or by Pull. User must click **Rebuild AI index**. | — |
 
 So today:
 
-- **Configurations updated automatically:** Only **sources.yaml** (and the files on disk under `.doc_sources/<name>/`).
+- **Configurations updated automatically:** Only **sources.yaml** (and the files on disk under `~/.draft/.doc_sources/<name>/`).
 - **Search index:** Updated when user runs **Pull** from the UI (because api_pull calls `search_index.build_index` after pull). If the user adds a source via **setup.sh** or **CLI only**, search is not updated until they run Pull from the UI or reindex manually.
 - **Vector index:** Never updated automatically; user must run "Rebuild AI index."
 
@@ -298,14 +326,14 @@ So today:
 
 If a user **manually edits sources.yaml** and adds a new repo (e.g. pastes a new block with name and source), the following is true:
 
-- **Tree:** The new source will **not** appear in the sidebar until the repo directory exists. For non-vault sources that means `.doc_sources/<name>/` must exist and contain files—i.e. they must run **Pull** first. For vault, the directory is `vault/`.
+- **Tree:** The new source will **not** appear in the sidebar until the repo directory exists. For non-vault sources that means `~/.draft/.doc_sources/<name>/` must exist and contain files—i.e. they must run **Pull** first. For vault, the directory is `~/.draft/vault/`.
 - **Manifest:** `draft_config.json` is regenerated **on app startup** and **at the end of every Pull**. So after a manual edit, either restart the app or run Pull; then the manifest will include the new source (with `resolved_path` once the path exists).
-- **Files:** Nothing is fetched or copied until the user runs **Pull**. Pull reads sources.yaml and for each entry (except vault) fetches from GitHub or copies from the local path into `.doc_sources/<name>/`.
+- **Files:** Nothing is fetched or copied until the user runs **Pull**. Pull reads sources.yaml and for each entry (except vault) fetches from GitHub or copies from the local path into `~/.draft/.doc_sources/<name>/`.
 
 **Next steps to get manually added sources into the system:**
 
 1. **Run Pull** (UI: **Pull** button, or CLI: `python scripts/pull.py`).  
-   This creates `.doc_sources/<name>/`, fetches/copies `.md` files, and regenerates the manifest. If you use the **UI** Pull button, the **search index** is also rebuilt automatically.
+   This creates `~/.draft/.doc_sources/<name>/`, fetches/copies `.md` files, and regenerates the manifest. If you use the **UI** Pull button, the **search index** is also rebuilt automatically.
 
 2. **Search (full-text):**  
    - If you used the **UI** Pull button, search is already updated.  
@@ -320,7 +348,7 @@ So after a manual edit: run **`python scripts/verify_sources.py`** to check stru
 
 ### 7.4 Are config updates supported by all input methods?
 
-| Input method | How it adds a source | sources.yaml updated? | .doc_sources populated? | Search index updated? | Vector index updated? |
+| Input method | How it adds a source | sources.yaml updated? | ~/.draft/.doc_sources populated? | Search index updated? | Vector index updated? |
 |--------------|----------------------|------------------------|--------------------------|------------------------|-------------------------|
 | **setup.sh** "Add new sources" | Prompts for path or GitHub URL; runs `pull.py -a <arg>`. | ✓ Yes | ✓ Yes (do_pull) | ✗ No (no call to reindex) | ✗ No |
 | **UI "Add source" box** | User types path or URL; POST /api/add_source → `pull.py -a source --quiet`. | ✓ Yes | ✓ Yes (do_pull inside -a) | ✓ Yes* (*UI then calls api_pull, which rebuilds search) | ✗ No |
@@ -328,7 +356,7 @@ So after a manual edit: run **`python scripts/verify_sources.py`** to check stru
 
 So:
 
-- **sources.yaml** and **.doc_sources/** are updated by **all** input methods (they all go through `pull.py -a`).
+- **sources.yaml** and **~/.draft/.doc_sources/** are updated by **all** input methods (they all go through `pull.py -a`).
 - **Search index** is updated only when the **UI** is used (because the UI triggers an extra Pull, which rebuilds search). Setup and CLI do not trigger search reindex.
 - **Vector index** is **never** updated automatically by any method.
 
@@ -349,13 +377,13 @@ There is **no single standard interface** today that guarantees: add source → 
    - Write **sources.yaml** (append or update one repo).
    - When meta layer exists: update **draft_config.json** (add/update one source entry; set resolved_path).
 3. **Sync files.**
-   - Run pull for that source (or full pull): write `.doc_sources/<source_id>/`.
+   - Run pull for that source (or full pull): write `~/.draft/.doc_sources/<source_id>/`.
 4. **Update metadata (when meta layer exists).**
-   - Scan new/changed files under `.doc_sources/<source_id>/`; compute content_hash; update **file_registry**.
+   - Scan new/changed files under `~/.draft/.doc_sources/<source_id>/`; compute content_hash; update **file_registry**.
 5. **Update search index.**
-   - Rebuild Whoosh index from `.doc_sources/` (full rebuild or incremental if we add it later).
+   - Rebuild Whoosh index from `~/.draft/.doc_sources/` (full rebuild or incremental if we add it later).
 6. **Update vector index.**
-   - Rebuild Chroma from `.doc_sources/` (full rebuild or incremental), including content_hash in chunk metadata.
+   - Rebuild Chroma from `~/.draft/.doc_sources/` (full rebuild or incremental), including content_hash in chunk metadata.
 
 **Single entry points that should call this pipeline:**
 
@@ -369,7 +397,7 @@ There is **no single standard interface** today that guarantees: add source → 
 
 ## 8. Future: Browser Drop
 
-- **Drop action:** Plugin sends current page URL + content (or URL only and backend fetches). Backend creates a new source of type `url` and a file in `.doc_sources/<source_id>/` (e.g. sanitized filename + `.md`).
+- **Drop action:** Plugin sends current page URL + content (or URL only and backend fetches). Backend creates a new source of type `url` and a file in `~/.draft/.doc_sources/<source_id>/` (e.g. sanitized filename + `.md`).
 - **Metadata to store:** `origin_url`, `drop_timestamp`, `content_type` in manifest and in file registry (and optionally in Chroma metadata) so Draft can **reconstruct and reload** (e.g. re-fetch from URL or show "origin: …" in UI).
 
 ---

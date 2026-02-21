@@ -1,7 +1,10 @@
 # Python 3.11 or 3.12 recommended. Python 3.14+ is not supported by chromadb (Pydantic v1).
+# NumPy must be <2 for PyTorch/sentence-transformers/Chroma binary compatibility.
+numpy>=1.24,<2
 python-dotenv>=1.0.0
 click>=8.0
 fastapi>=0.100
+python-multipart>=0.0.6
 uvicorn[standard]>=0.22
 whoosh>=2.7
 chromadb>=0.4.22,<0.6
