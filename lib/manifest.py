@@ -1,10 +1,13 @@
 """
 Generate draft_config.json from sources.yaml (single source of truth).
 The manifest is always derived; never hand-edited. Used for re-link and tooling.
+Vault and .doc_sources live under DRAFT_HOME (~/.draft); resolved_path reflects that.
 """
 import json
 import re
 from pathlib import Path
+
+from lib.paths import get_doc_sources_root, get_vault_root
 
 DOC_SOURCES_DIR = ".doc_sources"
 VAULT_DIR = "vault"
@@ -52,10 +55,10 @@ def _source_type(name: str, source: str, url: str | None) -> str:
 
 def _resolved_path(draft_root: Path, name: str, source: str, source_type: str) -> str | None:
     if source_type == "vault":
-        p = (draft_root / VAULT_DIR).resolve()
+        p = get_vault_root()
         return str(p) if p.exists() else None
     if source_type == "github":
-        p = (draft_root / DOC_SOURCES_DIR / name).resolve()
+        p = get_doc_sources_root() / name
         return str(p) if p.exists() else None
     # local
     if not source:

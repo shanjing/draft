@@ -1,34 +1,17 @@
 {
   "version": 1,
   "sources": {
-    "vault": {
-      "source_type": "vault",
-      "source": "./vault",
-      "resolved_path": "/Users/shan/workspace/draft/vault"
-    },
-    "shanjing_adk-lab": {
-      "source_type": "github",
-      "source": "https://github.com/shanjing/adk-lab",
-      "resolved_path": "/Users/shan/workspace/draft/.doc_sources/shanjing_adk-lab"
-    },
     "MarginCall": {
       "source_type": "local",
-      "source": "./.doc_sources/MarginCall",
-      "resolved_path": "/Users/shan/workspace/draft/.doc_sources/MarginCall"
+      "source": "../MarginCall",
+      "url": "https://github.com/shanjing/MarginCall",
+      "resolved_path": "/Users/shanjing/workspace/MarginCall"
     },
     "google_adk-python": {
       "source_type": "github",
       "source": "https://github.com/google/adk-python",
-      "resolved_path": "/Users/shan/workspace/draft/.doc_sources/google_adk-python"
-    },
-    "ginobefun_agentic-design-patterns-cn": {
-      "source_type": "github",
-      "source": "https://github.com/ginobefun/agentic-design-patterns-cn"
-    },
-    "X": {
-      "source_type": "local",
-      "source": "../X",
-      "resolved_path": "/Users/shan/workspace/X"
+      "url": "https://github.com/google/adk-python",
+      "resolved_path": "/Users/shanjing/.draft/.doc_sources/google_adk-python"
     }
   },
   "file_registry_path": ".draft/file_registry.json"

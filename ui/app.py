@@ -2,9 +2,13 @@
 Draft UI: serve document tree and markdown content. Launch with uvicorn.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+# Disable Chroma telemetry before any chromadb import (avoids "capture() takes 1 positional argument" error)
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse, StreamingResponse
@@ -25,6 +29,8 @@ except ImportError:
     pass
 
 from lib.log import logger, configure as configure_log
+from lib.paths import get_doc_sources_root, get_vault_root
+
 configure_log()
 
 
@@ -83,9 +89,8 @@ def _paths_to_tree_node(paths: list[str]) -> dict:
 
 
 def _doc_sources_root() -> Path:
-    """Root for repo dirs: .doc_sources if present, else draft root (legacy)."""
-    doc_sources = DRAFT_ROOT / DOC_SOURCES_DIR
-    return doc_sources if doc_sources.is_dir() else DRAFT_ROOT
+    """Root for repo dirs: ~/.draft/.doc_sources (or DRAFT_HOME)."""
+    return get_doc_sources_root()
 
 
 def get_tree() -> list:
@@ -97,7 +102,7 @@ def get_tree() -> list:
     result = []
     for name in repos:
         if name == VAULT_DIR:
-            repo_dir = DRAFT_ROOT / VAULT_DIR
+            repo_dir = get_vault_root()
         else:
             repo_dir = doc_sources / name
         if not repo_dir.is_dir():
@@ -315,7 +320,7 @@ def api_doc(repo: str, path: str):
     if ".." in path or path.startswith("/"):
         raise HTTPException(status_code=400, detail="Invalid path")
     if repo == VAULT_DIR:
-        repo_root = DRAFT_ROOT / VAULT_DIR
+        repo_root = get_vault_root()
     else:
         repo_root = _doc_sources_root() / repo
     full = repo_root / path

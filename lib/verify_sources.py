@@ -1,12 +1,14 @@
 """
 Verify sources.yaml after manual edit: structure, required fields, optional path checks.
 Use from CLI (scripts/verify_sources.py) or in tests.
+Vault and .doc_sources paths are under DRAFT_HOME (~/.draft).
 """
 import re
 from pathlib import Path
 
 from lib.manifest import build_manifest
 from lib.manifest import _parse_sources_yaml  # same parser used by manifest/pull/app
+from lib.paths import get_doc_sources_root, get_vault_root
 
 
 REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -62,10 +64,10 @@ def verify_sources_yaml(
             if "resolved_path" not in entry:
                 st = entry.get("source_type", "")
                 if st == "vault":
-                    warnings.append(f"'{name}': vault path not found (create {draft_root / 'vault'})")
+                    warnings.append(f"'{name}': vault path not found (create {get_vault_root()})")
                 elif st == "github":
                     warnings.append(
-                        f"'{name}': not pulled yet (run Pull to create .doc_sources/{name})"
+                        f"'{name}': not pulled yet (run Pull to create {get_doc_sources_root() / name})"
                     )
                 else:
                     src = entry.get("source", "")

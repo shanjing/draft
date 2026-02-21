@@ -1,6 +1,6 @@
 # Intelligence Layer Design: Search, Embeddings, and RAG (Ask)
 
-**Scope:** Full-text search, vector embeddings, and the Ask (RAG) feature. This layer reads from the **storage layer** (vault + `.doc_sources/`) and the **metadata layer** (manifest is not yet used here; see storage-and-metadata-design.md for re-link and content_hash plans). The intelligence layer is **read-only** with respect to source files: it builds and queries indexes; it does not modify docs or config.
+**Scope:** Full-text search, vector embeddings, and the Ask (RAG) feature. This layer reads from the **storage layer** (**`~/.draft/vault/`** and **`~/.draft/.doc_sources/`**, or `DRAFT_HOME`) and the **metadata layer** (manifest is not yet used here; see storage-and-metadata-design.md for re-link and content_hash plans). The intelligence layer is **read-only** with respect to source files: it builds and queries indexes; it does not modify docs or config.
 
 **Goals:** (1) **Search** — fast full-text lookup over all `.md` docs. (2) **Ask** — answer user questions using only the user’s docs (RAG: retrieve relevant chunks, then LLM with strict context-only prompting). (3) Keep search and RAG simple, reproducible, and configurable (local vs cloud LLM, one embedding model).
 
@@ -12,7 +12,7 @@
 flowchart LR
   subgraph storage["Storage (input)"]
     vault["vault/*.md"]
-    docs[".doc_sources/<repo>/*.md"]
+    docs["~/.draft/.doc_sources/<repo>/*.md"]
   end
 
   subgraph search["Full-text search"]
@@ -38,7 +38,7 @@ flowchart LR
 
 **Data flow:**
 
-- **Search:** Storage → Whoosh index (build from vault + `.doc_sources/`) → GET `/api/search?q=...` → results with repo, path, snippet.
+- **Search:** Storage → Whoosh index (build from `~/.draft/vault/` + `~/.draft/.doc_sources/`) → GET `/api/search?q=...` → results with repo, path, snippet.
 - **Ask:** Storage → chunking → embed → Chroma; at query time: embed query → Chroma similarity → top-k chunks → LLM with context → streamed answer + citations.
 
 Indexes are **rebuilt on demand** (no incremental updates today). Search index is rebuilt when the user runs **Pull** from the UI or **Reindex**; vector index is rebuilt only when the user runs **Rebuild AI index** or `scripts/index_for_ai.py`.
@@ -58,13 +58,13 @@ Indexes are **rebuilt on demand** (no incremental updates today). Search index i
 |------------|--------|
 | **Index dir** | `DRAFT_ROOT/.search_index/` |
 | **Schema** | `repo` (ID), `path` (ID), `content` (TEXT, stored) |
-| **Source** | `vault/` and `.doc_sources/<repo>/` — same roots as pull and ingest |
+| **Source** | **`~/.draft/vault/`** and **`~/.draft/.doc_sources/<repo>/`** — same roots as pull and ingest |
 
 Implementation: `ui/search_index.py` (or project-level `lib` if factored out). Whoosh handles tokenization and scoring; snippets are produced via `hit.highlights("content")` with Whoosh’s default highlighter (HTML tags stripped for plain text).
 
 ### 1.3 Build and query
 
-- **Build:** `build_index(draft_root)` — clears existing index, walks vault and `.doc_sources/`, adds each `.md` as one document. No exclusions are applied in the current search index (pull/ingest use README.md, CLAUDE.md, and directory exclusions; search could be aligned later).
+- **Build:** `build_index(draft_root)` — clears existing index, walks `~/.draft/vault/` and `~/.draft/.doc_sources/`, adds each `.md` as one document. No exclusions are applied in the current search index (pull/ingest use README.md, CLAUDE.md, and directory exclusions; search could be aligned later).
 - **Query:** `search(draft_root, q, limit=50)` → list of `{"repo", "path", "snippet"}`.
 - **When rebuilt:** After **Pull** in the UI (api_pull calls `search_index.build_index`); or explicitly via POST `/api/reindex`. Not rebuilt by CLI pull or by add-source alone.
 
@@ -93,7 +93,7 @@ Implementation: `lib/chunking.py`. `chunk_markdown(repo, path, content)` returns
 
 ### 2.3 Metadata per chunk
 
-- **repo** — Source id (vault or repo name under `.doc_sources/`).
+- **repo** — Source id (vault or repo name under `~/.draft/.doc_sources/`).
 - **path** — Relative path within that source (e.g. `docs/foo.md`).
 - **heading** — Section heading (from ## or ###) or empty.
 - **chunk_index** — Order within the file.
@@ -128,7 +128,7 @@ Implementation: `lib/ingest.py` (build), `lib/ai_engine.py` (retrieve). Same emb
 ### 3.4 Build
 
 - **Build:** `lib.ingest.build_index(draft_root, verbose)`:
-  - Collect chunks from vault + `.doc_sources/` (same exclusions as pull: README.md, CLAUDE.md, exclude dirs).
+  - Collect chunks from `~/.draft/vault/` + `~/.draft/.doc_sources/` (same exclusions as pull: README.md, CLAUDE.md, exclude dirs).
   - Delete existing `draft_docs` collection and create a new one.
   - Encode all chunk texts with the SentenceTransformer model; add to Chroma with ids, embeddings, metadatas, documents.
 - **Trigger:** User runs **Rebuild AI index** in the UI (POST `/api/reindex_ai`) or `python scripts/index_for_ai.py`. **Not** triggered by Pull or add-source.
@@ -197,8 +197,8 @@ So: **search** is updated when the user pulls or reindexes from the UI; **Ask** 
 
 Both **search** and **ingest** read from:
 
-- **vault/** — All `.md` under vault (except exclusions below).
-- **.doc_sources/<repo>/** — One directory per repo in sources.yaml (after pull).
+- **~/.draft/vault/** — All `.md` under vault (except exclusions below).
+- **~/.draft/.doc_sources/<repo>/** — One directory per repo in sources.yaml (after pull).
 
 **Exclusions** (in ingest and pull; search currently indexes all .md under the same dirs):
 
@@ -232,4 +232,4 @@ Aligning search with these exclusions is a possible improvement so search and As
 | CLI vector build | `scripts/index_for_ai.py` | `main()` → `ingest.build_index` |
 | API | `ui/app.py` | GET `/api/search`, POST `/api/ask`, GET `/api/llm_status`, POST `/api/reindex`, POST `/api/reindex_ai` |
 
-This design stays compatible with the storage and metadata layers: intelligence reads from vault and `.doc_sources/`; when the metadata layer adds a file registry and content_hash, the intelligence layer can be extended to store and use content_hash in Chroma without changing the overall flow.
+This design stays compatible with the storage and metadata layers: intelligence reads from `~/.draft/vault/` and `~/.draft/.doc_sources/`; when the metadata layer adds a file registry and content_hash, the intelligence layer can be extended to store and use content_hash in Chroma without changing the overall flow.

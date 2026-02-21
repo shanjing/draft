@@ -1,6 +1,7 @@
 """
 Full-text search index over draft .md files using Whoosh.
 Index is stored under DRAFT_ROOT/.search_index/.
+Doc sources and vault are read from DRAFT_HOME (~/.draft).
 """
 import re
 from pathlib import Path
@@ -9,8 +10,8 @@ from whoosh.fields import ID, TEXT, Schema
 from whoosh.index import create_in, open_dir, exists_in
 from whoosh.qparser import QueryParser
 
-DOC_SOURCES_DIR = ".doc_sources"
-VAULT_DIR = "vault"
+from lib.paths import get_doc_sources_root, get_vault_root
+
 INDEX_DIR = ".search_index"
 CONTENT_FIELD = "content"
 
@@ -45,7 +46,7 @@ def _add_repo_to_writer(writer, repo_name: str, repo_dir: Path) -> int:
 
 
 def build_index(draft_root: Path) -> int:
-    """Index .md under vault/ and draft_root/.doc_sources/<repo>/. Returns document count."""
+    """Index .md under ~/.draft/vault and ~/.draft/.doc_sources/<repo>/. Returns document count."""
     idx_path = _index_path(draft_root)
     idx_path.mkdir(parents=True, exist_ok=True)
     schema = get_schema()
@@ -56,10 +57,10 @@ def build_index(draft_root: Path) -> int:
     ix = create_in(str(idx_path), schema)
     writer = ix.writer()
     count = 0
-    vault_dir = draft_root / VAULT_DIR
+    vault_dir = get_vault_root()
     if vault_dir.is_dir():
-        count += _add_repo_to_writer(writer, VAULT_DIR, vault_dir)
-    sources_dir = draft_root / DOC_SOURCES_DIR
+        count += _add_repo_to_writer(writer, "vault", vault_dir)
+    sources_dir = get_doc_sources_root()
     if sources_dir.is_dir():
         for repo_dir in sorted(sources_dir.iterdir()):
             if not repo_dir.is_dir() or repo_dir.name.startswith("."):

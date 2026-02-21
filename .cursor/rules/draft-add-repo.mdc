@@ -5,9 +5,9 @@ alwaysApply: true
 
 # draft repo: layout and tooling
 
-- **Tracked repos** are in **`sources.yaml`**: each key = subdirectory name; each value has `source` (path or GitHub URL) and optional `url` (git origin). At most one `url` per repo; duplicates normalized on pull. For local git repos, `url` is added when using `pull.py -a` or on the next pull.
+- **Tracked repos** are in **`sources.yaml`**: each key = subdirectory name; each value has `source` (path or GitHub URL) and optional `url` (git origin). At most one `url` per repo; duplicates normalized on pull. For local git repos, `url` is added when using `pull.py -a` or on the next pull. Pulled docs and vault live under **`~/.draft/`** (or **`DRAFT_HOME`**): `~/.draft/.doc_sources/<name>/` and `~/.draft/vault/`.
 - **Sources:** `source` can be a **local path** (e.g. `../OtherRepo`, `./MarginCall`) or a **GitHub URL** (e.g. `https://github.com/owner/repo`). GitHub sources are fetched via the API (no clone); same `.md` exclusions as local.
-- **Pull is pull-only:** `scripts/pull.py` copies from source into draft when newer; it does **not** delete files in draft when they are removed from the source.
+- **Pull is pull-only:** `scripts/pull.py` copies from source into `~/.draft/.doc_sources/<name>/` when newer; it does **not** delete files when they are removed from the source.
 - **Setup:** `./setup.sh` creates `.venv`, installs deps, and installs the activation banner (figlet-style “Draft”, PWD, tracked repos).
 
 # Document UI (ui/)
@@ -27,7 +27,7 @@ alwaysApply: true
 
 # .md rules and exclusions
 
-- Copy only **`.md`** files; preserve directory structure (e.g. `docs/foo.md` → `draft/<RepoName>/docs/foo.md`).
+- Copy only **`.md`** files; preserve directory structure (e.g. `docs/foo.md` → `~/.draft/.doc_sources/<RepoName>/docs/foo.md`).
 - Create only directories that contain at least one copied `.md`.
 - **Exclude:** top-level `README.md`, `CLAUDE.md`, `.claude/`, `.cursor/`, `.pytest_cache/`, `.venv/`, `.git/`, `__pycache__/`, `.tmp/`, `.adk/`.
 
@@ -39,4 +39,4 @@ alwaysApply: true
 - **`-s`** — With `-r`, show first 3 lines of each file.
 - **`-a REPO`** — Add repo (name, path, or GitHub URL), update `sources.yaml`, add `url` if local git repo, run pull.
 
-To stop tracking: remove the repo from `sources.yaml` and optionally delete its subdirectory in draft.
+To stop tracking: remove the repo from `sources.yaml` and optionally delete its subdirectory under `~/.draft/.doc_sources/<name>`.
