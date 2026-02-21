@@ -4,8 +4,6 @@
 repos:
   vault:
     source: ./vault
-  shanjing_adk-lab:
-    source: https://github.com/shanjing/adk-lab
   MarginCall:
     source: ./.doc_sources/MarginCall
   google_adk-python:

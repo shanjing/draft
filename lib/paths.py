@@ -28,3 +28,11 @@ def get_doc_sources_root() -> Path:
 def get_vault_root() -> Path:
     """Vault directory: ~/.draft/vault (or DRAFT_HOME/vault)."""
     return get_draft_home() / VAULT_DIR
+
+
+def ensure_vault_ready() -> Path:
+    """Ensure DRAFT_HOME and vault directory exist; create if missing. Call at startup."""
+    home = get_draft_home()
+    vault = home / VAULT_DIR
+    vault.mkdir(parents=True, exist_ok=True)
+    return vault

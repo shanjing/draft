@@ -1,7 +1,15 @@
+# Source of truth for all doc sources. Vault and normal repos.
+# - vault: local append-only store at DRAFT_HOME/vault (~/.draft/vault). source is path relative to DRAFT_HOME.
+# - Other entries: pulled from source (path or GitHub URL) into DRAFT_HOME/.doc_sources/<name>/.
 repos:
+  vault:
+    source: ./vault
   MarginCall:
     source: ../MarginCall
-    url: https://github.com/shanjing/MarginCall
-  google_adk-python:
-    source: https://github.com/google/adk-python
+    url: https://github.com/shanjing/MarginCall.git
+  adk-python:
+    source: /Users/shan/workspace/adk-python
     url: https://github.com/google/adk-python
+  draft:
+    source: /Users/shan/workspace/draft
+    url: https://github.com/shanjing/draft

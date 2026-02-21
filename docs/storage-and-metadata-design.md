@@ -1,10 +1,16 @@
 # Storage & Metadata Design: Access Layer and Reconnection
 
-**Scope:** Storage layer + access layer. Intelligence layer (embeddings, Chroma, LLM) is out of scope for this design. Goal: **re-connect with storage after it is detached** using content identity (hashing) and path mapping; support future browser-drop with URL as source.
+**Scope:** Storage layer + access layer. 
+
+**Goal:** re-connect with storage after it is detached using content identity (hashing) and path mapping; support future browser-drop with URL as source.
 
 **Data locations:** Doc data lives under **`~/.draft/`** (or **`DRAFT_HOME`**): **`.doc_sources/<source_id>/`** for pulled sources and **`vault/`** for the vault. The repo root holds code and `sources.yaml` only.
 
-**copy/sync source files into `~/.draft/.doc_sources/<source_id>/`** for all non-vault sources (pull from GitHub, copy from local paths). **Vault** lives in **`~/.draft/vault/`** (outside `.doc_sources/`). The tree, search, and Ask read vault from `~/.draft/vault/` and other docs from `~/.draft/.doc_sources/`. This design **adds a meta layer on top**—manifest, file registry, content hashing—for reconnection and portability; it does not replace the existing "sync into .doc_sources" flow.
+**copy/sync source files into `~/.draft/.doc_sources/<source_id>/`** for all non-vault sources (pull from GitHub, copy from local paths).
+
+**Vault** lives in **`~/.draft/vault/`** (outside `.doc_sources/`). 
+
+**metadata layer:** The tree, search, and Ask read vault from `~/.draft/vault/` and other docs from `~/.draft/.doc_sources/`. This design **adds a meta layer on top**—manifest, file registry, content hashing—for reconnection and portability; it works along with the existing "sync into .doc_sources" flow.
 
 ---
 
@@ -16,6 +22,7 @@ flowchart TB
     setup["setup.sh\n(Add sources)"]
     cli["CLI: pull.py -a\n(path or GitHub URL)"]
     ui["UI: Add source box\n(POST /api/add_source)"]
+    vault_ui["UI: Vault drop zone\n(drag-and-drop or click)\nPOST /api/vault/upload"]
     drop["Future: File drop\n(Browser plugin → URL + content)"]
   end
 
@@ -26,7 +33,7 @@ flowchart TB
   end
 
   subgraph meta["Metadata layer"]
-    sources["sources.yaml\n(repos: name, source, url)"]
+    sources["sources.yaml\n(single source of truth:\nvault + repos, name, source, url)"]
     manifest["draft_config.json\n(manifest: source_id, paths, types)"]
     registry[".draft/file_registry.json\n(file → content_hash, path)"]
     sources --> manifest
@@ -37,10 +44,10 @@ flowchart TB
 
   subgraph storage["Storage layer"]
     external["External sources\n(local dir, GitHub, iCloud, SSD)"]
-    vault[("Vault\n(~/.draft/vault/ — later S3, iCloud)")]
+    vault[("Vault\n(~/.draft/vault/\nappend-only, no delete)")]
     docs[("~/.draft/.doc_sources/<source_id>/\n(filesystem, pulled .md)")]
     external -->|"pull / copy"| docs
-    vault -.->|"separate"| pipeline
+    vault_ui -->|"upload"| vault
   end
 
   subgraph intel["Intelligence layer (existing)"]
@@ -55,6 +62,7 @@ flowchart TB
   setup --> pipeline
   cli --> pipeline
   ui --> api
+  vault_ui --> api
   drop -.->|"future"| api
 
   pipeline -->|"sync"| docs
@@ -69,11 +77,11 @@ flowchart TB
 
 **Legend:**
 
-- **Source input methods:** All feed into the same **standard add-source pipeline** (or will, once unified). File drop is future (browser plugin).
-- **Access layer:** FastAPI backend; runs the pipeline (config → pull → metadata → search → vector).
-- **Metadata layer:** `sources.yaml` (human-editable), `draft_config.json` (manifest for re-link), `.draft/file_registry.json` (file → content_hash). Updated by the pipeline when sources are added or paths change.
-- **Storage layer:** **Vault** lives at **`~/.draft/vault/`** (later configurable to encrypted S3, iCloud, etc.). **`~/.draft/.doc_sources/`** is the filesystem for pulled sources only. Pull/copy fills `~/.draft/.doc_sources/<source_id>/`; Draft reads vault from `~/.draft/vault/` and other docs from `~/.draft/.doc_sources/`.
-- **Intelligence layer:** Whoosh (full-text) and Chroma (vectors) are rebuilt from `~/.draft/.doc_sources/` (and vault) by the pipeline; LLM uses Chroma for Ask.
+- **Source input methods:** Add-source (setup, CLI, UI) feed the **standard add-source pipeline**. **Vault** has its own input: UI drop zone (drag-and-drop or click to choose) → `POST /api/vault/upload`. Future: browser plugin file drop.
+- **Access layer:** FastAPI backend; runs the pipeline (config → pull → metadata → search → vector) and serves vault upload.
+- **Metadata layer:** **`sources.yaml`** is the **single source of truth** for all sources (vault + repos): vault entry `source: ./vault`, others as before. `draft_config.json` (manifest) and `.draft/file_registry.json` (file → content_hash) are derived/updated by the pipeline.
+- **Storage layer:** **Vault** at **`~/.draft/vault/`** is **append-only** (no delete; duplicate filenames get a numeric suffix). **`~/.draft/.doc_sources/`** is for pulled sources only. Tree and doc viewer read vault and `.doc_sources/`; vault file list is **not** stored—it is **scanned on each** `GET /api/tree`.
+- **Intelligence layer:** Whoosh (full-text) and Chroma (vectors) are rebuilt from `~/.draft/.doc_sources/` and vault; LLM uses Chroma for Ask.
 
 ---
 
@@ -87,13 +95,31 @@ flowchart TB
 
 ---
 
+### 1.1 Vault improvements (implemented)
+
+The following vault behavior is implemented and reflected in the diagram above.
+
+| Aspect | Behavior |
+|--------|----------|
+| **Source of truth** | **Vault is listed in `sources.yaml`** with `source: ./vault` (path relative to DRAFT_HOME). Same file defines vault and all other repos; tree and services resolve paths from it. |
+| **Adding files to vault** | **UI only:** Sidebar has a **vault drop zone** under the vault header. User can **drag-and-drop** files from the OS or **click** the zone to open a file picker. Both call `POST /api/vault/upload` (multipart `files`). No CLI “add file to vault” yet. |
+| **Append-only** | Vault is **append-only**: there is **no delete**. If an uploaded file has the same name as an existing one, the backend saves the new file with a **numeric suffix** (e.g. `doc_1.md`). |
+| **File list (index)** | **No separate index.** The list of files in the vault is **not** maintained in a DB or manifest. On each `GET /api/tree`, the server **scans** `~/.draft/vault/` (and other source dirs), filters by allowed doc extensions, and builds the tree. So the filesystem is the only source of truth for “what’s in the vault.” |
+| **Document types** | **Global allowed types** (tree + doc viewer): `.md`, `.txt`, `.pdf`, `.doc`, `.docx` (capped at five). Vault and all repos use the same list; tree and `/api/doc` only list/serve these. |
+| **UI collapse** | The vault block in the sidebar has a **collapse** control (arrow on the header). When collapsed, both the **drop zone** and the **file list** under vault are hidden; only the “vault” header row remains. |
+| **Tree order** | Vault is always **first** in the tree when present (sources.yaml is read, then result order is adjusted so vault is first). |
+
+**Diagram changes:** The architecture diagram now shows **sources.yaml** as the single source of truth for vault and repos, the **UI vault drop zone** as an input that uploads to vault via `POST /api/vault/upload`, and **vault** as append-only storage with no delete.
+
+---
+
 ## 2. Artifacts and Locations
 
 | Artifact | Location | Role |
 |----------|----------|------|
 | **Manifest** | `.draft/draft_config.json` at draft root | **Generated** from `sources.yaml` + resolved paths (see §2.1). **Implemented.** Verify required before build. Machine-readable; used for tooling; re-link will use it when file registry exists. |
-| **Sources list** | `sources.yaml` | **Single source of truth** for humans: list of repos (name, source, url). See §2.1 below. |
-| **Vault** | **`~/.draft/vault/`** (or `DRAFT_HOME/vault/`) | **Separate from .doc_sources.** Holds curated/private docs; can later be backed by encrypted S3, iCloud, etc. Not written by pull. |
+| **Sources list** | `sources.yaml` | **Single source of truth** for humans: list of **vault** (source: ./vault) and all repos (name, source, url). See §2.1 below. |
+| **Vault** | **`~/.draft/vault/`** (or `DRAFT_HOME/vault/`) | **Separate from .doc_sources.** Entry in `sources.yaml`; filled via UI drop/click → `POST /api/vault/upload`. Append-only; no delete. Can later be backed by S3, iCloud, etc. Not written by pull. |
 | **Doc store (filesystem)** | **`~/.draft/.doc_sources/<source_id>/`** | Pull/copy writes here (GitHub fetch, local copy). Vault is *not* here. The meta layer sits on top. |
 | **File registry** | `.draft/file_registry.json` (path in manifest) | **Not yet implemented.** Planned: list of known files with hash + source_id + relative path (for re-link). |
 | **Vector store** | `.vector_store/` (Chroma) | Stores chunk embeddings + metadata; chunk metadata includes `source_id`, `path`, and **content_hash** (see below). |

@@ -10,6 +10,13 @@ This repo stores private documents (tech details, drafts) extracted from other r
 
 ---
 
+**Design documents** are in **`docs/`** at the repo root:
+- **`docs/storage-and-metadata-design.md`** — Storage layer, vault, sources.yaml as source of truth, manifest, file registry, reconnection; includes architecture diagram (Mermaid) and vault improvements.
+- **`docs/intelligence-layer-design.md`** — Intelligence layer (embeddings, RAG, LLM).
+- **`docs/local-oracle-design.md`** — Local oracle / Q&A over docs.
+
+---
+
 **Document UI:** Web UI (`ui/`, FastAPI + static frontend) serves the document tree, renders markdown, and supports Pull, Add source (GitHub URL or local path), full-text search (Whoosh), and pinning repos to the top. Full-text search uses an index under `.search_index/`, rebuilt automatically after each Pull (or via `POST /api/reindex`). Endpoints: `GET /api/tree`, `GET /api/doc/{repo}/{path}`, `GET /api/search?q=...`, `POST /api/pull`, `POST /api/add_source`, `POST /api/reindex`. Run with `python scripts/serve.py` or `uvicorn ui.app:app --host 0.0.0.0 --port 8058`.
 
 ---

@@ -4,6 +4,24 @@
   const docEl = document.getElementById('doc');
   const errorEl = document.getElementById('error');
 
+  var THEME_KEY = 'draft-theme';
+  function getTheme() {
+    try {
+      var t = localStorage.getItem(THEME_KEY);
+      return t === 'bright' ? 'bright' : 'night';
+    } catch (e) { return 'night'; }
+  }
+  function setTheme(theme) {
+    document.body.setAttribute('data-theme', theme);
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+    var sw = document.getElementById('theme-switch');
+    if (sw) sw.setAttribute('aria-checked', theme === 'bright');
+  }
+  setTheme(getTheme());
+  document.getElementById('theme-switch') && document.getElementById('theme-switch').addEventListener('click', function () {
+    setTheme(getTheme() === 'bright' ? 'night' : 'bright');
+  });
+
   function showPlaceholder() {
     placeholderEl.classList.remove('hidden');
     docEl.classList.add('hidden');
@@ -16,6 +34,22 @@
     docEl.classList.add('hidden');
     errorEl.textContent = msg;
     errorEl.classList.remove('hidden');
+  }
+
+  function renderMermaidBlocks(container) {
+    if (typeof mermaid === 'undefined') return;
+    var blocks = container.querySelectorAll('pre code.language-mermaid');
+    if (blocks.length === 0) return;
+    blocks.forEach(function (code) {
+      var pre = code.parentElement;
+      if (!pre || pre.tagName !== 'PRE') return;
+      var div = document.createElement('div');
+      div.className = 'mermaid';
+      div.textContent = code.textContent || '';
+      pre.parentNode.replaceChild(div, pre);
+    });
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+    mermaid.run({ nodes: container.querySelectorAll('.mermaid') }).catch(function () {});
   }
 
   function showDoc(html, sourceType) {
@@ -33,6 +67,7 @@
         h1.appendChild(badge);
       }
     }
+    renderMermaidBlocks(docEl);
     docEl.classList.remove('hidden');
   }
 
@@ -131,9 +166,10 @@
       var isVault = repo.name === 'vault';
       var isPinned = pinnedSet[repo.name];
       var sourceType = getSourceType(repo);
-      html += '<div class="repo-block collapsed' + (isVault ? ' vault-repo' : '') + '" data-repo="' + escapeAttr(repo.name) + '" data-source-type="' + escapeAttr(sourceType) + '">';
+      var startCollapsed = !isVault;
+      html += '<div class="repo-block' + (startCollapsed ? ' collapsed' : '') + (isVault ? ' vault-repo' : '') + '" data-repo="' + escapeAttr(repo.name) + '" data-source-type="' + escapeAttr(sourceType) + '">';
       html += '<div class="repo-header">';
-      html += '<button type="button" class="btn-repo-collapse" title="Collapse/expand this repo" aria-expanded="false"><span class="repo-btn-icon" aria-hidden="true">▶</span></button>';
+      html += '<button type="button" class="btn-repo-collapse" title="Collapse/expand this repo" aria-expanded="' + (startCollapsed ? 'false' : 'true') + '"><span class="repo-btn-icon" aria-hidden="true">' + (startCollapsed ? '▶' : '▼') + '</span></button>';
       if (isVault) {
         html += '<span class="repo-name vault-name">' + escapeHtml(repo.name) + ' <span class="vault-icon" aria-hidden="true">🔐</span></span>';
       } else {
@@ -144,6 +180,12 @@
         html += '<button type="button" class="btn-repo-down" title="Move to bottom" data-repo="' + escapeAttr(repo.name) + '" aria-label="Move to bottom"><span class="repo-btn-icon" aria-hidden="true">↓</span></button>';
       }
       html += '</div>';
+      if (isVault) {
+        html += '<div class="vault-drop-zone" id="vault-drop-zone" aria-label="Drop file into vault" role="button" tabindex="0">';
+        html += '<input type="file" class="vault-drop-zone-input" id="vault-file-input" multiple aria-hidden="true" tabindex="-1">';
+        html += '<span class="vault-drop-zone-text">Drop file here or click to choose → vault</span>';
+        html += '</div>';
+      }
       html += '<ul class="repo-tree">' + renderChildren(repo.tree, repo.name, '') + '</ul></div>';
       if (isVault) {
         html += '<div class="tree-vault-separator" aria-hidden="true"></div>';
@@ -208,6 +250,91 @@
         setRepoOrder(order);
         renderTree(lastRepos);
       });
+    });
+    var dropZone = treeEl.querySelector('#vault-drop-zone');
+    if (dropZone) setupVaultDropZone(dropZone);
+  }
+
+  function uploadFilesToVault(files) {
+    if (!files || files.length === 0) return;
+    var form = new FormData();
+    for (var i = 0; i < files.length; i++) form.append('files', files[i]);
+    if (typeof appendConsoleLine === 'function') appendConsoleLine('$ upload to vault: ' + files.length + ' file(s)');
+    fetch('/api/vault/upload', { method: 'POST', body: form })
+      .then(function (r) {
+        return r.json().then(function (data) {
+          return { ok: r.ok, status: r.status, data: data };
+        }).catch(function () {
+          return { ok: false, status: r.status, data: { error: r.statusText || 'Upload failed' } };
+        });
+      })
+      .then(function (result) {
+        var data = result.data;
+        if (result.ok && data && data.ok && data.saved && data.saved.length) {
+          if (typeof appendConsoleLine === 'function') appendConsoleLine('Saved to vault: ' + data.saved.join(', '));
+          refreshTree();
+        } else {
+          var errMsg = (data && data.error) ? data.error : ('HTTP ' + result.status);
+          if (typeof appendConsoleLine === 'function') appendConsoleLine('Upload failed: ' + errMsg);
+        }
+      })
+      .catch(function (err) {
+        if (typeof appendConsoleLine === 'function') appendConsoleLine('Upload failed: ' + (err.message || err));
+        refreshTree();
+      });
+  }
+
+  function setupVaultDropZone(el) {
+    var fileInput = el.querySelector('.vault-drop-zone-input');
+    function prevent(e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    el.addEventListener('dragover', function (e) {
+      prevent(e);
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      el.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', function (e) {
+      prevent(e);
+      if (!el.contains(e.relatedTarget)) el.classList.remove('drag-over');
+    });
+    el.addEventListener('drop', function (e) {
+      prevent(e);
+      el.classList.remove('drag-over');
+      var dt = e.dataTransfer;
+      var files = dt && dt.files;
+      if (files && files.length > 0) {
+        uploadFilesToVault(files);
+        return;
+      }
+      if (dt && dt.items && dt.items.length > 0) {
+        var collected = [];
+        for (var i = 0; i < dt.items.length; i++) {
+          if (dt.items[i].kind === 'file') {
+            var f = dt.items[i].getAsFile();
+            if (f) collected.push(f);
+          }
+        }
+        if (collected.length > 0) uploadFilesToVault(collected);
+      }
+    });
+    if (fileInput) {
+      fileInput.addEventListener('change', function () {
+        var files = this.files;
+        if (files && files.length > 0) uploadFilesToVault(files);
+        this.value = '';
+      });
+    }
+    el.addEventListener('click', function (e) {
+      if (e.target === fileInput) return;
+      if (fileInput) fileInput.click();
+    });
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        prevent(e);
+        if (fileInput) fileInput.click();
+      }
     });
   }
 
@@ -401,18 +528,39 @@
     return escapeHtml(s).replace(/"/g, '&quot;');
   }
 
+  var BINARY_DOC_EXTS = ['.pdf', '.doc', '.docx'];
+  function isBinaryDoc(path) {
+    var p = (path || '').toLowerCase();
+    return BINARY_DOC_EXTS.some(function (ext) { return p.endsWith(ext); });
+  }
+
   function loadDoc(repo, path, sourceType) {
     if (sourceType === undefined) sourceType = repoSourceTypeMap[repo] || 'local';
-    fetch('/api/doc/' + encodeURIComponent(repo) + '/' + path.split('/').map(encodeURIComponent).join('/'))
+    var url = '/api/doc/' + encodeURIComponent(repo) + '/' + path.split('/').map(encodeURIComponent).join('/');
+    fetch(url)
       .then(function (r) {
         if (!r.ok) throw new Error(r.status === 404 ? 'Not found' : 'Failed to load');
+        if (isBinaryDoc(path)) return r.blob();
         return r.text();
       })
-      .then(function (md) {
-        if (typeof marked !== 'undefined') {
-          showDoc(marked.parse(md, { gfm: true }), sourceType);
+      .then(function (data) {
+        if (isBinaryDoc(path)) {
+          var blob = data;
+          var blobUrl = URL.createObjectURL(blob);
+          var ext = path.toLowerCase().slice(path.lastIndexOf('.'));
+          if (ext === '.pdf') {
+            showDoc('<iframe class="doc-binary-view" src="' + escapeAttr(blobUrl) + '" title="PDF"></iframe>', sourceType);
+          } else {
+            showDoc('<p class="doc-download">Binary document. <a href="' + escapeAttr(blobUrl) + '" download="' + escapeAttr(path.split('/').pop()) + '">Download</a></p>', sourceType);
+          }
+          setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 60000);
         } else {
-          showDoc('<pre>' + escapeHtml(md) + '</pre>', sourceType);
+          var md = data;
+          if (typeof marked !== 'undefined') {
+            showDoc(marked.parse(md, { gfm: true }), sourceType);
+          } else {
+            showDoc('<pre>' + escapeHtml(md) + '</pre>', sourceType);
+          }
         }
       })
       .catch(function (err) {
