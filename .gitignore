@@ -18,6 +18,7 @@ sources.yaml
 .search_index/
 .vector_store/
 .cache/
+.draft-ui.log
 
 # Cloned GitHub sources (setup.sh)
 .sources/

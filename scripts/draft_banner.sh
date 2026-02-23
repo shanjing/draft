@@ -19,7 +19,9 @@ printf '|  _ \\ _ __ __ _ / _| |_ \n'
 printf '| | | | '\''__/ _` | |_| __|\n'
 printf '| |_| | | | (_| |  _| |_ \n'
 printf '|____/|_|  \\__,_|_|  \\__|\n'
-printf "${N}\n"
+printf "${N}"
+printf '  your personal knowledge base\n'
+printf '\n'
 
 # Current working directory (path only, no "CWD" label)
 printf '  %s\n' "${PWD:-$(pwd)}"
