@@ -16,6 +16,15 @@ from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+
+class NoCacheStaticFiles(StaticFiles):
+    """Static files with Cache-Control so browsers revalidate (e.g. after background image changes)."""
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
 DRAFT_ROOT = Path(__file__).resolve().parent.parent
 DOC_SOURCES_DIR = ".doc_sources"
 VAULT_DIR = "vault"
@@ -766,5 +775,5 @@ def api_doc(repo: str, path: str):
         raise HTTPException(status_code=404, detail="Not found")
 
 
-app.mount("/assets", StaticFiles(directory=Path(__file__).parent / "assets"), name="assets")
+app.mount("/assets", NoCacheStaticFiles(directory=Path(__file__).parent / "assets"), name="assets")
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")

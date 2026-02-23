@@ -61,7 +61,7 @@ if [ ! -d "$SCRIPT_DIR/.venv" ]; then
   printf "  ${G}✓${N} .venv created\n"
   bash "$SCRIPT_DIR/scripts/install_venv_banner.sh" 2>/dev/null || true
   printf "${D}[2/2] Installing dependencies${N}\n"
-  "$SCRIPT_DIR/.venv/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt"
+  "$SCRIPT_DIR/.venv/bin/pip" install --progress-bar on -r "$SCRIPT_DIR/requirements.txt"
   printf "  ${G}✓${N} requirements installed\n"
   echo ""
 fi
@@ -470,7 +470,7 @@ if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/check_llm_ready.py 2>/dev/null); then
     done
     printf "${D}Build RAG/vector index ...${N}\n"
     # Ensure numpy<2 (and other deps) so index build doesn't fail with NumPy 2.x incompatibility
-    "$SCRIPT_DIR/.venv/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt" 2>/dev/null || true
+    "$SCRIPT_DIR/.venv/bin/pip" install --progress-bar on -r "$SCRIPT_DIR/requirements.txt" 2>/dev/null || true
     if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/index_for_ai.py --profile "$rag_profile" -v); then
       printf "${G}done.${N}\n"
     else
@@ -482,7 +482,11 @@ echo ""
 read -r -p "Start the Draft UI? (y/n): " start_ui
 case "$start_ui" in
   [yY]|[yY][eE][sS])
+    _UI_LOG="${SCRIPT_DIR}/.draft-ui.log"
+    nohup "$PYTHON" "$SCRIPT_DIR/scripts/serve.py" >> "$_UI_LOG" 2>&1 &
+    _UI_PID=$!
     ( sleep 2; case "$OS" in Darwin) open "http://localhost:8058" ;; *) xdg-open "http://localhost:8058" 2>/dev/null || true ;; esac ) &
-    .venv/bin/python scripts/serve.py
+    printf "  ${G}Draft UI started in background${N} (PID %s). Log: %s\n" "$_UI_PID" "$_UI_LOG"
+    printf "  ${D}Stop with: kill %s${N}\n" "$_UI_PID"
     ;;
 esac

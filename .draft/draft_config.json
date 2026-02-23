@@ -6,6 +6,12 @@
       "source": "./vault",
       "resolved_path": "/Users/shan/.draft/vault"
     },
+    "draft": {
+      "source_type": "local",
+      "source": ".",
+      "url": "https://github.com/shanjing/draft",
+      "resolved_path": "/Volumes/External/workspace/draft"
+    },
     "MarginCall": {
       "source_type": "local",
       "source": "../MarginCall",
