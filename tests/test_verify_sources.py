@@ -8,11 +8,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from lib.paths import get_sources_yaml_path
 from lib.verify_sources import verify_sources_yaml
 
 
 def test_verify_valid_sources_yaml(draft_root):
-    path = draft_root / "sources.yaml"
+    """draft_root fixture ensures sources.yaml exists in DRAFT_HOME (draft_home); verify that file."""
+    path = get_sources_yaml_path()
     ok, errors, warnings = verify_sources_yaml(path)
     assert ok is True
     assert errors == []
@@ -69,13 +71,22 @@ def test_verify_invalid_repo_name(tmp_path):
 
 
 def test_verify_check_paths_warns_missing(tmp_path):
+    import os
     path = tmp_path / "sources.yaml"
     path.write_text("repos:\n  vault:\n    source: ./vault\n  gh:\n    source: https://github.com/u/r\n")
-    ok, errors, warnings = verify_sources_yaml(
-        path, draft_root=tmp_path, check_paths=True
-    )
-    assert ok is True
-    assert any("vault" in w.lower() or "not pulled" in w.lower() or "path" in w.lower() for w in warnings)
+    prev = os.environ.get("DRAFT_HOME")
+    os.environ["DRAFT_HOME"] = str(tmp_path)
+    try:
+        ok, errors, warnings = verify_sources_yaml(
+            path, draft_root=tmp_path, check_paths=True
+        )
+        assert ok is True
+        assert any("vault" in w.lower() or "not pulled" in w.lower() or "path" in w.lower() for w in warnings)
+    finally:
+        if prev is None:
+            os.environ.pop("DRAFT_HOME", None)
+        else:
+            os.environ["DRAFT_HOME"] = prev
 
 
 def test_verify_check_paths_no_warn_when_exists(tmp_path):
@@ -100,6 +111,7 @@ def test_verify_check_paths_no_warn_when_exists(tmp_path):
 
 
 def test_cli_exit_0_on_valid(draft_root):
+    """CLI reads sources.yaml from DRAFT_HOME; draft_root (via draft_home) created it there."""
     import subprocess
     result = subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "verify_sources.py"), "-r", str(draft_root)],
@@ -112,23 +124,40 @@ def test_cli_exit_0_on_valid(draft_root):
 
 def test_update_manifest_raises_on_invalid_yaml(tmp_path):
     """update_manifest() must not write draft_config.json when sources.yaml is invalid."""
+    import os
     path = tmp_path / "sources.yaml"
     path.write_text("repos:\n  x:\n    source: \n")
-    from lib.manifest import update_manifest
-    with pytest.raises(ValueError, match="sources.yaml invalid"):
-        update_manifest(tmp_path)
-    manifest_file = tmp_path / ".draft" / "draft_config.json"
+    # Use a separate dir as draft_root so we don't write into REPO_ROOT
+    draft_root = tmp_path / "repo"
+    draft_root.mkdir()
+    prev = os.environ.get("DRAFT_HOME")
+    os.environ["DRAFT_HOME"] = str(tmp_path)
+    try:
+        from lib.manifest import update_manifest
+        with pytest.raises(ValueError, match="sources.yaml invalid"):
+            update_manifest(draft_root)
+    finally:
+        if prev is None:
+            os.environ.pop("DRAFT_HOME", None)
+        else:
+            os.environ["DRAFT_HOME"] = prev
+    manifest_file = draft_root / ".draft" / "draft_config.json"
     assert not manifest_file.exists()
 
 
 def test_cli_exit_1_on_invalid(tmp_path):
+    """CLI reads sources.yaml from DRAFT_HOME; invalid content -> exit 1."""
+    import os
+    import subprocess
     path = tmp_path / "sources.yaml"
     path.write_text("repos:\n  x:\n    source: \n")  # empty source -> error
-    import subprocess
+    env = os.environ.copy()
+    env["DRAFT_HOME"] = str(tmp_path)
     result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "verify_sources.py"), "-r", str(tmp_path), "-q"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "verify_sources.py"), "-q"],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        env=env,
     )
     assert result.returncode == 1

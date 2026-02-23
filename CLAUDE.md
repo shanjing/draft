@@ -2,7 +2,7 @@
 
 This repo stores private documents (tech details, drafts) extracted from other repositories. Each source repo has its own top-level subdirectory; only `.md` files are mirrored, with the same directory structure.
 
-**Tracked repos** are listed in **`sources.yaml`**: each key is the subdirectory name under **`~/.draft/.doc_sources/`** (or **`DRAFT_HOME/.doc_sources/`**); each value has `source` (path or GitHub URL) and optionally a single `url` (git origin URL). Vault lives at **`~/.draft/vault/`**. For local paths that are git repos, `url` is added automatically when using `scripts/pull.py -a` or on the next pull. Each repo block must have at most one `url` line (duplicates are normalized on pull).
+**Tracked repos** are listed in **`sources.yaml`** at **`~/.draft/sources.yaml`** (or **`$DRAFT_HOME/sources.yaml`**; default **`DRAFT_HOME`** is **`~/.draft`**). The repo ships **`sources.example.yaml`**; run `./setup.sh` or start the app to create `~/.draft/sources.yaml` from it if missing. In `sources.yaml`: each key is the subdirectory name under **`~/.draft/.doc_sources/`**; each value has `source` (path or GitHub URL) and optionally a single `url` (git origin URL). Vault lives at **`~/.draft/vault/`**. For local paths that are git repos, `url` is added automatically when using `scripts/pull.py -a` or on the next pull. Each repo block must have at most one `url` line (duplicates are normalized on pull).
 
 **Sources:** A source can be (1) a **local path** (e.g. `../OtherRepo`, `./MarginCall`), or (2) a **GitHub URL** (e.g. `https://github.com/owner/repo`). GitHub sources are fetched via the GitHub API (no clone); `.md` files are pulled with the same exclusions as local.
 

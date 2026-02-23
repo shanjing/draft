@@ -59,7 +59,7 @@ def verify_sources_yaml(
             errors.append(f"Repo '{name}': 'source:' is empty")
 
     if check_paths and draft_root is not None and not errors:
-        manifest = build_manifest(draft_root)
+        manifest = build_manifest(draft_root, sources_yaml_path=path)
         for name, entry in manifest.get("sources", {}).items():
             if "resolved_path" not in entry:
                 st = entry.get("source_type", "")

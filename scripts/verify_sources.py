@@ -14,6 +14,7 @@ _REPO_ROOT = _SCRIPT_DIR.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from lib.paths import get_sources_yaml_path
 from lib.verify_sources import verify_sources_yaml
 
 
@@ -23,7 +24,7 @@ from lib.verify_sources import verify_sources_yaml
     "draft_root",
     type=click.Path(file_okay=False, path_type=Path),
     default=_REPO_ROOT,
-    help="Draft repo root (sources.yaml and .doc_sources live here).",
+    help="Draft repo root (for resolving relative paths when using --check-paths).",
 )
 @click.option(
     "--check-paths",
@@ -40,7 +41,7 @@ from lib.verify_sources import verify_sources_yaml
 )
 def main(draft_root: Path, check_paths: bool, quiet: bool) -> None:
     draft_root = draft_root.resolve()
-    path = draft_root / "sources.yaml"
+    path = get_sources_yaml_path()
 
     ok, errors, warnings = verify_sources_yaml(
         path,

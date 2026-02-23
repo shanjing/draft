@@ -1,16 +1,19 @@
 """
 Draft data paths: user data lives under DRAFT_HOME (~/.draft by default).
-Repo root (DRAFT_ROOT) holds code and sources.yaml; vault and .doc_sources live under DRAFT_HOME.
+sources.yaml lives at DRAFT_HOME/sources.yaml; repo ships sources.example.yaml.
 """
 import os
+import shutil
 from pathlib import Path
 
 DOC_SOURCES_DIR = ".doc_sources"
 VAULT_DIR = "vault"
+SOURCES_YAML = "sources.yaml"
+SOURCES_EXAMPLE_YAML = "sources.example.yaml"
 
 
 def get_draft_home() -> Path:
-    """User data root: DRAFT_HOME env or ~/.draft. Always returns a resolved path."""
+    """User data root: DRAFT_HOME env or ~/.draft by default. Always returns a resolved path."""
     raw = os.environ.get("DRAFT_HOME", "").strip()
     if raw:
         p = Path(raw).expanduser().resolve()
@@ -18,6 +21,11 @@ def get_draft_home() -> Path:
         p = (Path.home() / ".draft").resolve()
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def get_sources_yaml_path() -> Path:
+    """Path to sources.yaml in DRAFT_HOME (~/.draft/sources.yaml by default)."""
+    return get_draft_home() / SOURCES_YAML
 
 
 def get_doc_sources_root() -> Path:
@@ -36,3 +44,17 @@ def ensure_vault_ready() -> Path:
     vault = home / VAULT_DIR
     vault.mkdir(parents=True, exist_ok=True)
     return vault
+
+
+def ensure_sources_yaml(draft_root: Path) -> Path:
+    """If DRAFT_HOME/sources.yaml is missing, create it from repo sources.example.yaml. Return its path."""
+    path = get_sources_yaml_path()
+    if path.is_file():
+        return path
+    get_draft_home().mkdir(parents=True, exist_ok=True)
+    example = draft_root / SOURCES_EXAMPLE_YAML
+    if example.is_file():
+        shutil.copy2(example, path)
+    else:
+        path.write_text("repos:\n")
+    return path

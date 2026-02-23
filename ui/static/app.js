@@ -22,7 +22,11 @@
     setTheme(getTheme() === 'bright' ? 'night' : 'bright');
   });
 
-  function showPlaceholder() {
+  var currentDoc = null;
+
+  function showPlaceholder(clearStorage) {
+    currentDoc = null;
+    if (clearStorage) clearDocHash();
     placeholderEl.classList.remove('hidden');
     docEl.classList.add('hidden');
     docEl.innerHTML = '';
@@ -30,6 +34,7 @@
   }
 
   function showError(msg) {
+    currentDoc = null;
     placeholderEl.classList.add('hidden');
     docEl.classList.add('hidden');
     errorEl.textContent = msg;
@@ -166,16 +171,18 @@
       var isVault = repo.name === 'vault';
       var isPinned = pinnedSet[repo.name];
       var sourceType = getSourceType(repo);
-      var startCollapsed = !isVault;
+      var startCollapsed = true;
       html += '<div class="repo-block' + (startCollapsed ? ' collapsed' : '') + (isVault ? ' vault-repo' : '') + '" data-repo="' + escapeAttr(repo.name) + '" data-source-type="' + escapeAttr(sourceType) + '">';
       html += '<div class="repo-header">';
       html += '<button type="button" class="btn-repo-collapse" title="Collapse/expand this repo" aria-expanded="' + (startCollapsed ? 'false' : 'true') + '"><span class="repo-btn-icon" aria-hidden="true">' + (startCollapsed ? '▶' : '▼') + '</span></button>';
       if (isVault) {
         html += '<span class="repo-name vault-name">' + escapeHtml(repo.name) + ' <span class="vault-icon" aria-hidden="true">🔐</span></span>';
+        html += '<button type="button" class="btn-repo-bookmark" id="btn-save-to-vault" title="Save current document to vault" aria-label="Save current document to vault"><span class="repo-btn-icon" aria-hidden="true">🔖</span></button>';
       } else {
         html += '<span class="repo-name">' + escapeHtml(repo.name) + '</span>';
       }
       if (!isVault) {
+        html += '<button type="button" class="btn-repo-remove" title="Remove source" data-repo="' + escapeAttr(repo.name) + '" aria-label="Remove source"><span class="repo-btn-icon" aria-hidden="true">❎</span></button>';
         html += '<button type="button" class="btn-repo-pin' + (isPinned ? ' pinned' : '') + '" title="' + (isPinned ? 'Unpin' : 'Pin to top') + '" data-repo="' + escapeAttr(repo.name) + '" aria-label="' + (isPinned ? 'Unpin' : 'Pin to top') + '"><span class="repo-btn-icon pin-emoji" aria-hidden="true">📌</span></button>';
         html += '<button type="button" class="btn-repo-down" title="Move to bottom" data-repo="' + escapeAttr(repo.name) + '" aria-label="Move to bottom"><span class="repo-btn-icon" aria-hidden="true">↓</span></button>';
       }
@@ -251,8 +258,96 @@
         renderTree(lastRepos);
       });
     });
+    treeEl.querySelectorAll('.btn-repo-remove').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var name = btn.getAttribute('data-repo');
+        if (!name) return;
+        var msg = 'Remove source "' + name + '"?\n\nThis will remove it from sources.yaml, delete its folder under .doc_sources, and rebuild metadata indexes.';
+        if (!window.confirm(msg)) return;
+        if (typeof appendConsoleLine === 'function') appendConsoleLine('$ remove source ' + name);
+        beginExecution();
+        fetch('/api/remove_source', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name })
+        })
+          .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }).catch(function () { return { ok: false, data: {} }; }); })
+          .then(function (result) {
+            var data = result.data || {};
+            if (data.logs && data.logs.length && typeof appendConsoleLines === 'function') appendConsoleLines(data.logs);
+            if (result.ok && data.ok) {
+              if (currentDoc && currentDoc.repo === name) showPlaceholder(true);
+              refreshTree();
+            } else {
+              var err = data.error || data.detail || 'Failed to remove source.';
+              if (typeof appendConsoleLine === 'function') appendConsoleLine('Remove failed: ' + err);
+            }
+          })
+          .catch(function (err) {
+            if (typeof appendConsoleLine === 'function') appendConsoleLine('Remove failed: ' + (err.message || err));
+          })
+          .then(function () { endExecution(); });
+      });
+    });
+    treeEl.querySelectorAll('.btn-vault-file-remove').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var path = btn.getAttribute('data-path');
+        if (!path) return;
+        if (!window.confirm('Remove vault file "' + path + '"?')) return;
+        if (typeof appendConsoleLine === 'function') appendConsoleLine('$ vault remove ' + path);
+        beginExecution();
+        fetch('/api/vault/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: path })
+        })
+          .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }).catch(function () { return { ok: false, data: {} }; }); })
+          .then(function (result) {
+            var data = result.data || {};
+            if (data.logs && data.logs.length && typeof appendConsoleLines === 'function') appendConsoleLines(data.logs);
+            if (result.ok && data.ok) {
+              if (currentDoc && currentDoc.repo === 'vault' && currentDoc.path === path) showPlaceholder(true);
+              refreshTree();
+            } else {
+              var err = data.error || data.detail || 'Failed to remove vault file.';
+              if (typeof appendConsoleLine === 'function') appendConsoleLine('Vault remove failed: ' + err);
+            }
+          })
+          .catch(function (err) {
+            if (typeof appendConsoleLine === 'function') appendConsoleLine('Vault remove failed: ' + (err.message || err));
+          })
+          .then(function () { endExecution(); });
+      });
+    });
     var dropZone = treeEl.querySelector('#vault-drop-zone');
     if (dropZone) setupVaultDropZone(dropZone);
+    var btnSaveToVault = treeEl.querySelector('#btn-save-to-vault');
+    if (btnSaveToVault) {
+      btnSaveToVault.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (!currentDoc) return;
+        beginExecution();
+        fetch('/api/vault/save-from-doc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo: currentDoc.repo, path: currentDoc.path })
+        })
+          .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }).catch(function () { return { ok: false, data: {} }; }); })
+          .then(function (result) {
+            if (result.ok && result.data.saved && result.data.saved.length) {
+              if (typeof appendConsoleLine === 'function') appendConsoleLine('Saved to vault: ' + result.data.saved[0]);
+              refreshTree();
+            } else {
+              var err = (result.data && result.data.detail) ? result.data.detail : (result.data.error || 'Failed');
+              if (typeof appendConsoleLine === 'function') appendConsoleLine('Save to vault failed: ' + err);
+            }
+          })
+          .then(function () { endExecution(); });
+      });
+    }
   }
 
   function uploadFilesToVault(files) {
@@ -260,6 +355,7 @@
     var form = new FormData();
     for (var i = 0; i < files.length; i++) form.append('files', files[i]);
     if (typeof appendConsoleLine === 'function') appendConsoleLine('$ upload to vault: ' + files.length + ' file(s)');
+    beginExecution();
     fetch('/api/vault/upload', { method: 'POST', body: form })
       .then(function (r) {
         return r.json().then(function (data) {
@@ -281,7 +377,8 @@
       .catch(function (err) {
         if (typeof appendConsoleLine === 'function') appendConsoleLine('Upload failed: ' + (err.message || err));
         refreshTree();
-      });
+      })
+      .then(function () { endExecution(); });
   }
 
   function setupVaultDropZone(el) {
@@ -347,7 +444,19 @@
         html += '<ul class="tree-children">' + renderChildren(node.children || [], repo, prefix + node.name + '/') + '</ul></li>';
       } else {
         var path = node.path || node.name;
-        html += '<li><a href="#" data-repo="' + escapeAttr(repo) + '" data-path="' + escapeAttr(path) + '">' + escapeHtml(node.name) + '</a></li>';
+        var displayName = node.name;
+        if (repo === 'vault' && node.source) {
+          var src = String(node.source).slice(0, 8);
+          displayName += ' [' + src + ']';
+        }
+        if (repo === 'vault') {
+          html += '<li class="tree-file-row">';
+          html += '<a href="#" data-repo="' + escapeAttr(repo) + '" data-path="' + escapeAttr(path) + '">' + escapeHtml(displayName) + '</a>';
+          html += '<button type="button" class="btn-vault-file-remove" data-path="' + escapeAttr(path) + '" title="Remove file from vault" aria-label="Remove file from vault">❎</button>';
+          html += '</li>';
+        } else {
+          html += '<li><a href="#" data-repo="' + escapeAttr(repo) + '" data-path="' + escapeAttr(path) + '">' + escapeHtml(displayName) + '</a></li>';
+        }
       }
     });
     return html;
@@ -362,7 +471,24 @@
   }
 
   var consoleContent = document.getElementById('system-console-content');
+  var systemConsolePanel = document.getElementById('system-console');
   var MAX_CONSOLE_LINES = 200;
+  var activeExecutions = 0;
+
+  function setConsoleRunning(running) {
+    if (!systemConsolePanel) return;
+    systemConsolePanel.classList.toggle('running', !!running);
+  }
+
+  function beginExecution() {
+    activeExecutions += 1;
+    setConsoleRunning(true);
+  }
+
+  function endExecution() {
+    activeExecutions = Math.max(0, activeExecutions - 1);
+    setConsoleRunning(activeExecutions > 0);
+  }
 
   function appendConsoleLine(text) {
     if (!consoleContent) return;
@@ -388,6 +514,7 @@
     statusEl.classList.remove('hidden', 'error');
     statusEl.classList.add('pending');
     appendConsoleLine('$ pull');
+    beginExecution();
     fetch('/api/pull', { method: 'POST' })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -411,7 +538,8 @@
         statusEl.textContent = 'Pull request failed.';
         statusEl.classList.add('error');
         appendConsoleLine('Pull request failed: ' + (err.message || ''));
-      });
+      })
+      .then(function () { endExecution(); });
   }
 
   (function initSystemConsoleToggle() {
@@ -481,6 +609,7 @@
       if (!source) return;
       input.disabled = true;
       appendConsoleLine('$ add source ' + source);
+      beginExecution();
       fetch('/api/add_source', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -493,7 +622,7 @@
             appendConsoleLine('Source added.');
             input.value = '';
             // Run pull so the new source is fetched and tree updates
-            fetch('/api/pull', { method: 'POST' })
+            return fetch('/api/pull', { method: 'POST' })
               .then(function (r) { return r.json(); })
               .then(function (pullData) {
                 if (pullData.logs && pullData.logs.length) appendConsoleLines(pullData.logs);
@@ -508,7 +637,7 @@
         .catch(function (err) {
           appendConsoleLine('Add failed: ' + (err.message || ''));
         })
-        .then(function () { input.disabled = false; input.focus(); });
+        .then(function () { input.disabled = false; input.focus(); endExecution(); });
     }
     input.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') {
@@ -534,7 +663,45 @@
     return BINARY_DOC_EXTS.some(function (ext) { return p.endsWith(ext); });
   }
 
+  var DOC_HASH_PREFIX = 'doc/';
+  var DOC_STORAGE_KEY = 'draft-current-doc';
+  function getDocFromHash() {
+    var h = location.hash.slice(1);
+    if (h.indexOf(DOC_HASH_PREFIX) !== 0) return null;
+    var parts = h.slice(DOC_HASH_PREFIX.length).split('/');
+    if (parts.length < 2) return null;
+    try {
+      var repo = decodeURIComponent(parts[0]);
+      var path = parts.slice(1).map(function (p) { return decodeURIComponent(p); }).join('/');
+      return repo && path ? { repo: repo, path: path } : null;
+    } catch (e) { return null; }
+  }
+  function getDocFromStorage() {
+    try {
+      var raw = sessionStorage.getItem(DOC_STORAGE_KEY) || localStorage.getItem(DOC_STORAGE_KEY);
+      if (!raw) return null;
+      var o = JSON.parse(raw);
+      return (o && o.repo && o.path) ? { repo: o.repo, path: o.path } : null;
+    } catch (e) { return null; }
+  }
+  function setDocHash(repo, path) {
+    var value = DOC_HASH_PREFIX + encodeURIComponent(repo) + '/' + path.split('/').map(function (p) { return encodeURIComponent(p); }).join('/');
+    if (location.hash !== '#' + value) location.hash = value;
+    try { sessionStorage.setItem(DOC_STORAGE_KEY, JSON.stringify({ repo: repo, path: path })); } catch (e) {}
+    try { localStorage.setItem(DOC_STORAGE_KEY, JSON.stringify({ repo: repo, path: path })); } catch (e) {}
+  }
+  function clearDocHash() {
+    if (location.hash.indexOf('#' + DOC_HASH_PREFIX) === 0) location.hash = '';
+    try { sessionStorage.removeItem(DOC_STORAGE_KEY); } catch (e) {}
+    try { localStorage.removeItem(DOC_STORAGE_KEY); } catch (e) {}
+  }
+  function getCurrentDocToRestore() {
+    return getDocFromStorage() || getDocFromHash();
+  }
+
   function loadDoc(repo, path, sourceType) {
+    currentDoc = { repo: repo, path: path };
+    setDocHash(repo, path);
     if (sourceType === undefined) sourceType = repoSourceTypeMap[repo] || 'local';
     var url = '/api/doc/' + encodeURIComponent(repo) + '/' + path.split('/').map(encodeURIComponent).join('/');
     fetch(url)
@@ -568,17 +735,32 @@
       });
   }
 
+  function restoreCurrentDoc() {
+    var doc = getCurrentDocToRestore();
+    if (doc) loadDoc(doc.repo, doc.path);
+  }
+
+  restoreCurrentDoc();
+
   fetch('/api/tree')
     .then(function (r) { return r.json(); })
     .then(function (data) {
       renderTree(data.repos || []);
+      var doc = getCurrentDocToRestore();
+      if (doc && (!currentDoc || currentDoc.repo !== doc.repo || currentDoc.path !== doc.path)) loadDoc(doc.repo, doc.path);
     })
     .catch(function () {
       treeEl.innerHTML = '<p class="error">Failed to load tree.</p>';
     });
 
+  window.addEventListener('hashchange', function () {
+    var doc = getDocFromHash();
+    if (doc && (!currentDoc || currentDoc.repo !== doc.repo || currentDoc.path !== doc.path)) loadDoc(doc.repo, doc.path);
+    else if (!getDocFromHash() && currentDoc) showPlaceholder(false);
+  });
+
   document.getElementById('btn-home').addEventListener('click', function () {
-    showPlaceholder();
+    showPlaceholder(true);
   });
 
   document.getElementById('btn-collapse').addEventListener('click', collapseAll);
@@ -686,29 +868,47 @@
     });
 
     var reindexBtn = document.getElementById('ask-reindex');
-    if (reindexBtn) {
-      reindexBtn.addEventListener('click', function () {
-        reindexBtn.disabled = true;
-        reindexBtn.textContent = 'Building…';
-        appendConsoleLine('$ reindex AI');
-        fetch('/api/reindex_ai', { method: 'POST' })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            reindexBtn.textContent = d.ok ? 'Rebuild AI index (' + (d.indexed || 0) + ' chunks)' : 'Rebuild AI index';
-            if (d.logs && d.logs.length) appendConsoleLines(d.logs);
-            else if (d.ok) appendConsoleLine('AI index built: ' + (d.indexed || 0) + ' chunks.');
-            if (!d.ok && d.error) {
-              showAskError(d.error);
-              if (!(d.logs && d.logs.length)) appendConsoleLine('AI reindex failed: ' + (d.error || ''));
-            }
-          })
-          .catch(function (err) {
-            reindexBtn.textContent = 'Rebuild AI index';
-            appendConsoleLine('AI reindex failed: ' + (err.message || ''));
-          })
-          .then(function () { reindexBtn.disabled = false; });
-      });
+    var reindexDeepBtn = document.getElementById('ask-reindex-deep');
+    function runAiReindex(mode) {
+      var quickBtn = reindexBtn;
+      var deepBtn = reindexDeepBtn;
+      if (quickBtn) quickBtn.disabled = true;
+      if (deepBtn) deepBtn.disabled = true;
+      if (mode === 'quick' && quickBtn) quickBtn.textContent = 'Building…';
+      if (mode === 'deep' && deepBtn) deepBtn.textContent = 'Building…';
+      appendConsoleLine('$ reindex AI --profile ' + mode);
+      beginExecution();
+      fetch('/api/reindex_ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: mode })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.logs && d.logs.length) appendConsoleLines(d.logs);
+          else if (d.ok) appendConsoleLine('AI index built: ' + (d.indexed || 0) + ' chunks.');
+          if (!d.ok && d.error) {
+            showAskError(d.error);
+            if (!(d.logs && d.logs.length)) appendConsoleLine('AI reindex failed: ' + (d.error || ''));
+          }
+        })
+        .catch(function (err) {
+          appendConsoleLine('AI reindex failed: ' + (err.message || ''));
+        })
+        .then(function () {
+          if (quickBtn) {
+            quickBtn.disabled = false;
+            quickBtn.textContent = 'Quick rebuild';
+          }
+          if (deepBtn) {
+            deepBtn.disabled = false;
+            deepBtn.textContent = 'Deep rebuild (nomic)';
+          }
+          endExecution();
+        });
     }
+    if (reindexBtn) reindexBtn.addEventListener('click', function () { runAiReindex('quick'); });
+    if (reindexDeepBtn) reindexDeepBtn.addEventListener('click', function () { runAiReindex('deep'); });
 
     function showAskError(msg) {
       errorEl.textContent = msg || '';
@@ -875,5 +1075,5 @@
     });
   }
 
-  showPlaceholder();
+  if (!currentDoc) showPlaceholder(false);
 })();

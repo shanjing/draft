@@ -67,7 +67,11 @@ if [ ! -d "$SCRIPT_DIR/.venv" ]; then
 fi
 PYTHON="${SCRIPT_DIR}/.venv/bin/python"
 
-SOURCES_YAML="$SCRIPT_DIR/sources.yaml"
+# User data and config: DRAFT_HOME defaults to ~/.draft; sources.yaml lives there
+DRAFT_HOME="${DRAFT_HOME:-$HOME/.draft}"
+export DRAFT_HOME
+mkdir -p "$DRAFT_HOME"
+SOURCES_YAML="$DRAFT_HOME/sources.yaml"
 has_sources() {
   [ -f "$SOURCES_YAML" ] && grep -q "source:" "$SOURCES_YAML" 2>/dev/null
 }
@@ -138,6 +142,18 @@ validate_github_repo() {
   git ls-remote --exit-code "$url" HEAD 1>/dev/null 2>&1
 }
 
+# Return 0 if repo name is already in sources.yaml (so we can skip add and avoid error)
+source_already_tracked() {
+  local name="$1"
+  [ ! -f "$SOURCES_YAML" ] && return 1
+  awk -v n="$name" '
+    /^[[:space:]]{2,}[A-Za-z0-9_.-]+[[:space:]]*:[[:space:]]*$/ {
+      gsub(/^[[:space:]]+/, ""); gsub(/[[:space:]]*:[[:space:]]*$/, ""); if ($0 == n) found=1
+    }
+    END { exit (found ? 0 : 1) }
+  ' "$SOURCES_YAML" 2>/dev/null
+}
+
 # List current tracked sources from sources.yaml (name and source path)
 list_tracked_sources() {
   [ ! -f "$SOURCES_YAML" ] && return
@@ -161,14 +177,23 @@ list_tracked_sources() {
   ' "$SOURCES_YAML" 2>/dev/null
 }
 
-# Ensure sources.yaml exists and has at least "repos:" so pull.py and display work (best effort)
+# Ensure sources.yaml exists in DRAFT_HOME: copy from repo sources.example.yaml if missing
 ensure_sources_yaml() {
   if [ ! -f "$SOURCES_YAML" ]; then
-    printf '%s\n' "repos:" > "$SOURCES_YAML"
+    if [ -f "$SCRIPT_DIR/sources.example.yaml" ]; then
+      cp "$SCRIPT_DIR/sources.example.yaml" "$SOURCES_YAML"
+      printf "${G}Created %s from sources.example.yaml (edit to add your doc sources).${N}\n" "$SOURCES_YAML"
+    else
+      printf '%s\n' "repos:" > "$SOURCES_YAML"
+    fi
     return
   fi
   if [ ! -s "$SOURCES_YAML" ] || ! grep -q '^repos:' "$SOURCES_YAML" 2>/dev/null; then
-    printf '%s\n' "repos:" > "$SOURCES_YAML"
+    if [ -f "$SCRIPT_DIR/sources.example.yaml" ]; then
+      cp "$SCRIPT_DIR/sources.example.yaml" "$SOURCES_YAML"
+    else
+      printf '%s\n' "repos:" > "$SOURCES_YAML"
+    fi
   fi
 }
 
@@ -183,6 +208,7 @@ fi
 read -r -p "Add new sources? (y/n): " add_sources
 case "$add_sources" in
   [yY]|[yY][eE][sS])
+    export DRAFT_SETUP=1
     printf "\n"
     printf "Enter a local path (relative or absolute) or a GitHub repo URL.\n"
     printf "Press Enter when done adding.\n"
@@ -208,6 +234,11 @@ case "$add_sources" in
       fi
       https_url="$(echo "$parsed" | head -1)"
       owner_repo="$(echo "$parsed" | tail -1)"
+      if source_already_tracked "$owner_repo"; then
+        printf "  ${D}%s is already in sources.yaml.${N}\n" "$owner_repo"
+        echo ""
+        continue
+      fi
       printf "  Checking GitHub repo: %s\n" "$owner_repo"
       if ! validate_github_repo "$https_url"; then
         printf "  ${R}Repo not found or not reachable.${N}\n"
@@ -233,6 +264,12 @@ case "$add_sources" in
     }
     resolved="$(echo "$resolve_out" | head -1)"
     add_arg="$(echo "$resolve_out" | tail -1)"
+    repo_name="$(basename "$resolved")"
+    if source_already_tracked "$repo_name"; then
+      printf "  ${D}%s is already in sources.yaml.${N}\n" "$repo_name"
+      echo ""
+      continue
+    fi
     md_count="$(find "$resolved" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')"
     printf "  Found: %s (%s .md file(s))\n" "$resolved" "$md_count"
     if [ -n "$md_count" ] && [ "$md_count" -gt 0 ]; then
@@ -407,6 +444,38 @@ esac
 printf "${G}✓ .venv ready.${N}\n"
 bash "$SCRIPT_DIR/scripts/install_venv_banner.sh" 2>/dev/null || true
 printf "${D}Activate with: source .venv/bin/activate${N}\n"
+echo ""
+
+# Build RAG/vector index if a valid LLM is configured; ask user first
+if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/check_llm_ready.py 2>/dev/null); then
+  while true; do
+    read -r -p "RAG/index is required to use the AI feature, do you want to build it now? You can always build it in the UI later. (y/n): " build_rag
+    build_rag="$(printf '%s' "$build_rag" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    case "$build_rag" in
+      y|yes) build_rag=1; break ;;
+      n|no)  build_rag=0; break ;;
+      *)     printf "  ${D}Please answer y or n.${N}\n" ;;
+    esac
+  done
+  if [ "$build_rag" = "1" ]; then
+    rag_profile="quick"
+    while true; do
+      read -r -p "Choose RAG/index rebuild mode: quick (faster, lighter model) or deep (nomic, slower). [quick/deep]: " rag_profile
+      rag_profile="$(printf '%s' "$rag_profile" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      case "$rag_profile" in
+        quick|q|"") rag_profile="quick"; break ;;
+        deep|d)      rag_profile="deep"; break ;;
+        *)           printf "  ${D}Please answer quick or deep.${N}\n" ;;
+      esac
+    done
+    printf "${D}Build RAG/vector index ...${N}\n"
+    if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/index_for_ai.py --profile "$rag_profile" -v); then
+      printf "${G}done.${N}\n"
+    else
+      printf "${R}failed (Ask index not built).${N}\n" >&2
+    fi
+  fi
+fi
 echo ""
 read -r -p "Start the Draft UI? (y/n): " start_ui
 case "$start_ui" in

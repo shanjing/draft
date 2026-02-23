@@ -9,6 +9,9 @@ __pycache__/
 .pytest_cache/
 *.pyc
 
+# User config (clone sources.example.yaml to sources.yaml; see README)
+sources.yaml
+
 # Draft generated / local data
 .draft/
 .doc_sources/

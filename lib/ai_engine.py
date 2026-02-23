@@ -7,6 +7,8 @@ from pathlib import Path
 
 from lib.ingest import VECTOR_DIR, COLLECTION_NAME, EMBED_MODEL, TRUST_REMOTE_CODE  # noqa: F401
 
+_EMBED_MODEL_CACHE: dict[tuple[str, bool], object] = {}
+
 
 def _env_strip(key: str, default: str = "") -> str:
     """Get env var and strip surrounding whitespace and quotes (safe for .env and Docker --env-file)."""
@@ -27,12 +29,49 @@ def _ensure_env_loaded(draft_root: Path) -> None:
     except ImportError:
         pass
 
+
+def llm_ready(draft_root: Path) -> bool:
+    """True if a valid LLM is configured: local (Ollama model set) or cloud with non-empty API key. No network check."""
+    _ensure_env_loaded(draft_root)
+    provider = _env_strip("DRAFT_LLM_PROVIDER", "").lower()
+    cloud_model = _env_strip("CLOUD_AI_MODEL")
+    local_model = _env_strip("LOCAL_AI_MODEL")
+    ollama_model = _env_strip("OLLAMA_MODEL")
+    if not provider and cloud_model:
+        provider = "gemini"
+    if not provider and (local_model or ollama_model):
+        provider = "ollama"
+    if not provider:
+        provider = "ollama"
+    if provider == "ollama":
+        return bool(ollama_model or local_model)
+    if provider == "claude":
+        return bool(_env_strip("ANTHROPIC_API_KEY"))
+    if provider == "gemini":
+        return bool(_env_strip("GEMINI_API_KEY") or _env_strip("GOOGLE_API_KEY"))
+    if provider == "openai":
+        return bool(_env_strip("OPENAI_API_KEY"))
+    return False
+
+
 TOP_K = 5
 
 SYSTEM_PROMPT = """You are a direct, precise assistant. Answer only using the provided context from the user's private documentation. If the answer is not in the context, say you don't know. Do not guess or use external knowledge. Be concise and cite which doc/section when relevant."""
 
 
-def _get_embedding_model():
+def _coerce_bool(v, default: bool) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("1", "true", "yes", "y", "on"):
+            return True
+        if s in ("0", "false", "no", "n", "off"):
+            return False
+    return default
+
+
+def _get_embedding_model(embed_model: str | None = None, trust_remote_code: bool | None = None):
     try:
         import numpy as np
         major = int(np.__version__.split(".")[0])
@@ -41,7 +80,12 @@ def _get_embedding_model():
     except ImportError:
         pass
     from sentence_transformers import SentenceTransformer
-    return SentenceTransformer(EMBED_MODEL, trust_remote_code=TRUST_REMOTE_CODE)
+    model_name = embed_model or EMBED_MODEL
+    trust = TRUST_REMOTE_CODE if trust_remote_code is None else bool(trust_remote_code)
+    key = (model_name, trust)
+    if key not in _EMBED_MODEL_CACHE:
+        _EMBED_MODEL_CACHE[key] = SentenceTransformer(model_name, trust_remote_code=trust)
+    return _EMBED_MODEL_CACHE[key]
 
 
 def _get_collection(draft_root: Path):
@@ -70,13 +114,28 @@ def retrieve(draft_root: Path, query: str, top_k: int = TOP_K) -> list[dict]:
     coll = _get_collection(draft_root)
     if coll is None:
         return []
-    model = _get_embedding_model()
-    q_emb = model.encode([query], show_progress_bar=False)
-    result = coll.query(
-        query_embeddings=q_emb.tolist(),
-        n_results=min(top_k, 20),
-        include=["metadatas", "documents"],
-    )
+    meta = (getattr(coll, "metadata", None) or {})
+    embed_model = meta.get("embed_model") or EMBED_MODEL
+    trust_remote_code = _coerce_bool(meta.get("trust_remote_code"), TRUST_REMOTE_CODE)
+
+    def _query_with(model_name: str, trust: bool):
+        model = _get_embedding_model(model_name, trust)
+        q_emb = model.encode([query], show_progress_bar=False)
+        return coll.query(
+            query_embeddings=q_emb.tolist(),
+            n_results=min(top_k, 20),
+            include=["metadatas", "documents"],
+        )
+
+    try:
+        result = _query_with(embed_model, trust_remote_code)
+    except Exception as e:
+        msg = str(e)
+        # Backward-compat: old collections may be quick-built but missing metadata.
+        if "Embedding dimension" in msg and "collection dimensionality" in msg and embed_model != "sentence-transformers/all-MiniLM-L6-v2":
+            result = _query_with("sentence-transformers/all-MiniLM-L6-v2", False)
+        else:
+            raise
     out = []
     metadatas = result.get("metadatas") or []
     documents = result.get("documents") or []

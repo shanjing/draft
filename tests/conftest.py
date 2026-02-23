@@ -12,8 +12,10 @@ if str(REPO_ROOT) not in sys.path:
 
 
 @pytest.fixture
-def draft_root():
-    """Draft repo root (has sources.yaml, etc.)."""
+def draft_root(draft_home):
+    """Draft repo root. Ensures sources.yaml exists in DRAFT_HOME (draft_home) from example if missing."""
+    from lib.paths import ensure_sources_yaml
+    ensure_sources_yaml(REPO_ROOT)
     return REPO_ROOT
 
 

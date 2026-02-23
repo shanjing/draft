@@ -38,8 +38,8 @@ fi
 printf '  LLM : %s\n' "$_LLM_LINE"
 unset _ENV_FILE _p _m _LLM_LINE
 
-# Tracked sources from sources.yaml: [ github/name | local directory/name ]
-_SOURCES_YAML="${_DRAFT_PROJECT_ROOT}/sources.yaml"
+# Tracked sources from sources.yaml in DRAFT_HOME (~/.draft/sources.yaml)
+_SOURCES_YAML="${DRAFT_HOME:-$HOME/.draft}/sources.yaml"
 if [ -f "$_SOURCES_YAML" ]; then
   _list=$(awk '
     /^[[:space:]]{2,}[A-Za-z0-9_.-]+[[:space:]]*:[[:space:]]*$/ {
