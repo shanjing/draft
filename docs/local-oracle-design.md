@@ -1,16 +1,15 @@
 # Design: The Local Oracle
 
-A RAG-based “Sam Rogers” style assistant over your private draft docs: sharp, direct, contextually aware, and without sending your notes to a public training set.
+A local RAG-based assistant over your scattered private draft docs: sharp, direct, contextually aware, and without exposing your notes to the public cloud.
 
 ---
 
 ## Goals
 
-- **Answer questions** using only the content of your mirrored `.md` files.
-- **Cite sources**: every answer links back to the original docs (and ideally to sections).
+- **Answer questions** using only the content of your own collected files.
+- **Cite sources**: every answer links back to the original docs.
 - **No leakage**: support a fully local path (embeddings + LLM) so nothing leaves your machine; optionally use Claude API for higher quality.
-- **Fits the existing stack**: build on draft’s pull → local files → web UI and re-use the doc viewer and tree.
-
+- **MCP Server**: can be an MCP for your other agents
 ---
 
 ## Architecture Overview
@@ -120,12 +119,8 @@ Store the exact chunk text in the index (or a stable reference) so retrieval can
 ### LLM Integration
 
 - **Providers**:
-  - **Claude (API)**: Claude 3.5 Sonnet (or current default). Best quality; request/response go over the network; no training on your data if you don’t log full context.
-  - **Local (Ollama)**: e.g. **Qwen-2.5-Coder-32B** (or another instruction model). Zero data leave the machine.
-- **Prompt design**:
-  - **System**: “You are a direct, precise assistant. Answer only using the provided context. If the answer is not in the context, say you don’t know. Do not guess or use external knowledge.”
-  - **User (or assistant)**: Include the retrieved chunks as the only allowed source, then the user question.
-- **Output**: Plain text answer (for streaming) plus a **structured list of citations** (repo, path, heading/link) derived from the chunks that were sent to the LLM.
+  - **Local (Ollama)**: e.g. **Qwen-3:8B** (or another instruction lightweight models). Zero data leave the machine.
+  - **Major cloud LLM**: works with all major models with API key
 
 ### API Contract (to be implemented in FastAPI)
 
@@ -171,15 +166,6 @@ Store the exact chunk text in the index (or a stable reference) so retrieval can
 - Vector store: `chromadb` or `faiss-cpu` (+ numpy).
 - LLM: `anthropic` for Claude; `ollama` or direct HTTP for local.
 - FastAPI: SSE is built-in (`StreamingResponse` with `text/event-stream`).
-
----
-
-## Out of Scope (for this design)
-
-- Multi-turn conversation memory.
-- Training or fine-tuning on your data.
-- MCP server or other agent protocols (separate doc if needed).
-- Authentication (assume local / trusted use for the oracle).
 
 ---
 
