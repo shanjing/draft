@@ -469,6 +469,8 @@ if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/check_llm_ready.py 2>/dev/null); then
       esac
     done
     printf "${D}Build RAG/vector index ...${N}\n"
+    # Ensure numpy<2 (and other deps) so index build doesn't fail with NumPy 2.x incompatibility
+    "$SCRIPT_DIR/.venv/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt" 2>/dev/null || true
     if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/index_for_ai.py --profile "$rag_profile" -v); then
       printf "${G}done.${N}\n"
     else
