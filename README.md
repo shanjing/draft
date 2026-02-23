@@ -1,6 +1,12 @@
-# draft
+# Draft
 
-A personal knowledge base with AI assistence and secured vault.
+Draft is a personal documentation hub that pulls document files from your other repos and GitHub
+projects into one browsable place. It gives you a unified view of scattered docs — engineering
+notes, design specs, drafts — with full-text search and an AI assistant that answers questions
+directly from your content.                                                                      
+
+No cloud sync. Your docs stay local. Works with or without any LLM — Ollama for fully offline use, or 
+Claude, OpenAI, and Gemini.
 
 Draft is alo a MCP server. [TODO] 
 
@@ -13,7 +19,7 @@ Draft is alo a MCP server. [TODO]
 ## Start it manually
 
 ```
-source .venv/bin/activate   # optional: activation banner + deps
+source .venv/bin/activate
 python scripts/serve.py     # start UI at http://localhost:8058
 ```
 
