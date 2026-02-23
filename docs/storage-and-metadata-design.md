@@ -4,7 +4,7 @@
 
 **Goal:** re-connect with storage after it is detached using content identity (hashing) and path mapping; support future browser-drop with URL as source.
 
-**Data locations:** Doc data lives under **`~/.draft/`** (or **`DRAFT_HOME`**): **`.doc_sources/<source_id>/`** for pulled sources and **`vault/`** for the vault. The repo root holds code and `sources.yaml` only.
+**Data locations:** Doc data and config live under **`~/.draft/`** (or **`DRAFT_HOME`**, default **`~/.draft`**): **`sources.yaml`** (source list), **`.doc_sources/<source_id>/`** (pulled sources), and **`vault/`**. The repo root holds code only. **`sources.example.yaml`** is the checked-in template; setup and app create **`~/.draft/sources.yaml`** from it when missing.
 
 **copy/sync source files into `~/.draft/.doc_sources/<source_id>/`** for all non-vault sources (pull from GitHub, copy from local paths).
 
@@ -118,7 +118,7 @@ The following vault behavior is implemented and reflected in the diagram above.
 | Artifact | Location | Role |
 |----------|----------|------|
 | **Manifest** | `.draft/draft_config.json` at draft root | **Generated** from `sources.yaml` + resolved paths (see §2.1). **Implemented.** Verify required before build. Machine-readable; used for tooling; re-link will use it when file registry exists. |
-| **Sources list** | `sources.yaml` | **Single source of truth** for humans: list of **vault** (source: ./vault) and all repos (name, source, url). See §2.1 below. |
+| **Sources list** | **`~/.draft/sources.yaml`** (or `DRAFT_HOME/sources.yaml`) | **Single source of truth** for humans: list of **vault** (source: ./vault) and all repos (name, source, url). Repo ships **`sources.example.yaml`**; setup/app create `sources.yaml` in DRAFT_HOME when missing. See §2.1 below. |
 | **Vault** | **`~/.draft/vault/`** (or `DRAFT_HOME/vault/`) | **Separate from .doc_sources.** Entry in `sources.yaml`; filled via UI drop/click → `POST /api/vault/upload`. Append-only; no delete. Can later be backed by S3, iCloud, etc. Not written by pull. |
 | **Doc store (filesystem)** | **`~/.draft/.doc_sources/<source_id>/`** | Pull/copy writes here (GitHub fetch, local copy). Vault is *not* here. The meta layer sits on top. |
 | **File registry** | `.draft/file_registry.json` (path in manifest) | **Not yet implemented.** Planned: list of known files with hash + source_id + relative path (for re-link). |

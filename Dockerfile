@@ -1,4 +1,4 @@
-# Draft UI: Your private AI document server. Build from repo root: docker build -t draft-ui .
+# Draft UI: Your personal knowledge base. Build from repo root: docker build -t draft-ui .
 FROM python:3.12-slim
 
 WORKDIR /app

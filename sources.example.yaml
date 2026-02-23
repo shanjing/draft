@@ -1,0 +1,16 @@
+# Your personal list of doc sources. Setup/app copy this to ~/.draft/sources.yaml (or $DRAFT_HOME/sources.yaml) when missing.
+# - vault: append-only store at ~/.draft/vault. Add README.md and other files via the UI vault drop zone.
+# - Other entries: pulled into ~/.draft/.doc_sources/<name>/ from local path or GitHub URL.
+#
+# Add sources via: ./setup.sh, UI "Add source", or: python scripts/pull.py -a <path-or-GitHub-URL>
+repos:
+  vault:
+    source: ./vault
+  draft:
+    source: .
+  # Example local repo (relative to draft repo root):
+  # my_notes:
+  #   source: ../my_notes
+  # Example GitHub repo (no local clone; .md files fetched via API):
+  # some_repo:
+  #   source: https://github.com/owner/repo

@@ -5,7 +5,7 @@ alwaysApply: true
 
 # draft repo: layout and tooling
 
-- **Tracked repos** are in **`sources.yaml`**: each key = subdirectory name; each value has `source` (path or GitHub URL) and optional `url` (git origin). At most one `url` per repo; duplicates normalized on pull. For local git repos, `url` is added when using `pull.py -a` or on the next pull. Pulled docs and vault live under **`~/.draft/`** (or **`DRAFT_HOME`**): `~/.draft/.doc_sources/<name>/` and `~/.draft/vault/`.
+- **Tracked repos** are in **`sources.yaml`** at **`~/.draft/sources.yaml`** (or **`$DRAFT_HOME/sources.yaml`**; default **DRAFT_HOME** is **~/.draft**). Repo ships **`sources.example.yaml`**; setup/app create `sources.yaml` in DRAFT_HOME when missing. Each key = subdirectory name; each value has `source` (path or GitHub URL) and optional `url` (git origin). At most one `url` per repo; duplicates normalized on pull. For local git repos, `url` is added when using `pull.py -a` or on the next pull. Pulled docs and vault live under **`~/.draft/`** (or **`DRAFT_HOME`**): `~/.draft/.doc_sources/<name>/` and `~/.draft/vault/`.
 - **Sources:** `source` can be a **local path** (e.g. `../OtherRepo`, `./MarginCall`) or a **GitHub URL** (e.g. `https://github.com/owner/repo`). GitHub sources are fetched via the API (no clone); same `.md` exclusions as local.
 - **Pull is pull-only:** `scripts/pull.py` copies from source into `~/.draft/.doc_sources/<name>/` when newer; it does **not** delete files when they are removed from the source.
 - **Setup:** `./setup.sh` creates `.venv`, installs deps, and installs the activation banner (figlet-style “Draft”, PWD, tracked repos).

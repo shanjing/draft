@@ -41,14 +41,34 @@ def _split_into_sections(content: str) -> list[tuple[str, str]]:
     return sections
 
 
-def _paragraphs(text: str) -> list[str]:
+def _paragraphs(text: str, chunk_max_chars: int = CHUNK_MAX_CHARS) -> list[str]:
     """Split text into paragraphs (blank-line separated)."""
-    return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    out: list[str] = []
+    for p in re.split(r"\n\s*\n", text):
+        p = p.strip()
+        if not p:
+            continue
+        # Hard-split very long paragraphs so one malformed block can't create huge chunks.
+        if len(p) <= chunk_max_chars:
+            out.append(p)
+            continue
+        start = 0
+        while start < len(p):
+            out.append(p[start : start + chunk_max_chars])
+            start += chunk_max_chars
+    return out
 
 
-def _chunk_section(repo: str, path: str, heading: str, body: str) -> list[Chunk]:
+def _chunk_section(
+    repo: str,
+    path: str,
+    heading: str,
+    body: str,
+    chunk_max_chars: int = CHUNK_MAX_CHARS,
+    chunk_overlap_paras: int = CHUNK_OVERLAP_PARAS,
+) -> list[Chunk]:
     """Chunk a section by paragraphs, respecting CHUNK_MAX_CHARS and overlap."""
-    paras = _paragraphs(body)
+    paras = _paragraphs(body, chunk_max_chars=chunk_max_chars)
     if not paras:
         return []
     chunks: list[Chunk] = []
@@ -58,7 +78,7 @@ def _chunk_section(repo: str, path: str, heading: str, body: str) -> list[Chunk]
 
     for p in paras:
         p_len = len(p) + 2  # +2 for newline
-        if current_len + p_len > CHUNK_MAX_CHARS and current:
+        if current_len + p_len > chunk_max_chars and current:
             text = "\n\n".join(current)
             chunks.append(
                 Chunk(
@@ -69,7 +89,7 @@ def _chunk_section(repo: str, path: str, heading: str, body: str) -> list[Chunk]
                     chunk_index=len(chunks),
                 )
             )
-            overlap = current[-CHUNK_OVERLAP_PARAS:] if CHUNK_OVERLAP_PARAS else []
+            overlap = current[-chunk_overlap_paras:] if chunk_overlap_paras else []
             current = overlap.copy()
             current_len = sum(len(x) + 2 for x in current)
         current.append(p)
@@ -89,10 +109,25 @@ def _chunk_section(repo: str, path: str, heading: str, body: str) -> list[Chunk]
     return chunks
 
 
-def chunk_markdown(repo: str, path: str, content: str) -> list[Chunk]:
+def chunk_markdown(
+    repo: str,
+    path: str,
+    content: str,
+    chunk_max_chars: int = CHUNK_MAX_CHARS,
+    chunk_overlap_paras: int = CHUNK_OVERLAP_PARAS,
+) -> list[Chunk]:
     """Chunk a single markdown file. Returns list of Chunk with metadata."""
     sections = _split_into_sections(content)
     out: list[Chunk] = []
     for heading, body in sections:
-        out.extend(_chunk_section(repo, path, heading, body))
+        out.extend(
+            _chunk_section(
+                repo,
+                path,
+                heading,
+                body,
+                chunk_max_chars=chunk_max_chars,
+                chunk_overlap_paras=chunk_overlap_paras,
+            )
+        )
     return out

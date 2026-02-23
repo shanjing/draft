@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from lib.paths import get_doc_sources_root, get_vault_root
+from lib.paths import get_doc_sources_root, get_sources_yaml_path, get_vault_root
 
 DOC_SOURCES_DIR = ".doc_sources"
 VAULT_DIR = "vault"
@@ -70,9 +70,10 @@ def _resolved_path(draft_root: Path, name: str, source: str, source_type: str) -
     return str(p) if p.exists() else None
 
 
-def build_manifest(draft_root: Path) -> dict:
-    """Build manifest dict from sources.yaml and resolved paths. No I/O except read yaml."""
-    sources_yaml = draft_root / "sources.yaml"
+def build_manifest(draft_root: Path, sources_yaml_path: Path | None = None) -> dict:
+    """Build manifest dict from sources.yaml and resolved paths. No I/O except read yaml.
+    If sources_yaml_path is None, read from DRAFT_HOME/sources.yaml."""
+    sources_yaml = sources_yaml_path if sources_yaml_path is not None else get_sources_yaml_path()
     repos = _parse_sources_yaml(sources_yaml)
     sources: dict[str, dict] = {}
     for name, repo in repos.items():
@@ -97,10 +98,10 @@ def build_manifest(draft_root: Path) -> dict:
 
 
 def update_manifest(draft_root: Path) -> None:
-    """Regenerate draft_config.json from sources.yaml. Fails if sources.yaml is invalid (verify is mandatory)."""
+    """Regenerate draft_config.json from sources.yaml (in DRAFT_HOME). Fails if sources.yaml is invalid (verify is mandatory)."""
     from lib.verify_sources import verify_sources_yaml
 
-    sources_yaml = draft_root / "sources.yaml"
+    sources_yaml = get_sources_yaml_path()
     ok, errors, _warnings = verify_sources_yaml(sources_yaml)
     if not ok:
         raise ValueError("sources.yaml invalid: " + "; ".join(errors))

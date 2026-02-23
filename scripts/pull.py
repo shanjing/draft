@@ -8,9 +8,18 @@ keeps whatever was last pulled; files deleted in source remain in draft until
 you remove them manually.
 Reads sources.yaml; applies same exclusions as CLAUDE.md.
 """
+import sys
 from pathlib import Path
+
+# Ensure repo root is on path so "lib" is importable when run as scripts/pull.py
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_DRAFT_ROOT = _SCRIPT_DIR.parent
+if str(_DRAFT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_DRAFT_ROOT))
+
 import base64
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -31,6 +40,7 @@ EXCLUDE_DIRS = (
     "__pycache__",
     ".tmp",
     ".adk",
+    ".cache",
 )
 DOC_SOURCES_DIR = ".doc_sources"
 VAULT_DIR = "vault"
@@ -131,7 +141,7 @@ def should_include(rel_path: str) -> bool:
     if Path(rel_path).name in EXCLUDE_BASENAME:
         return False
     parts = Path(rel_path).parts
-    if parts and parts[0] in EXCLUDE_DIRS:
+    if any(p in EXCLUDE_DIRS for p in parts):
         return False
     return True
 
@@ -352,12 +362,40 @@ def _normalize_sources_yaml(sources_yaml: Path) -> None:
         sources_yaml.write_text("".join(new_lines))
 
 
-def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
-    """Run pull from sources.yaml. When quiet, only echo summary lines (for UI console)."""
-    sources_yaml = draft_root / "sources.yaml"
-    if not sources_yaml.is_file():
-        raise click.ClickException(f"sources.yaml not found at {sources_yaml}")
+def _run_index_for_ai_if_ready(draft_root: Path, quiet: bool) -> None:
+    """If a valid LLM is configured, run index_for_ai and echo progress (for CLI). Skip when DRAFT_SETUP=1 (setup.sh does one build at the end)."""
+    if os.environ.get("DRAFT_SETUP"):
+        return
+    try:
+        from lib.ai_engine import llm_ready
+        if not llm_ready(draft_root):
+            return
+    except Exception:
+        return
+    index_script = draft_root / "scripts" / "index_for_ai.py"
+    if not index_script.is_file():
+        return
+    if not quiet:
+        click.echo("Building RAG index...")
+    result = subprocess.run(
+        [sys.executable, str(index_script)],
+        cwd=str(draft_root),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=os.environ.copy(),
+    )
+    if not quiet:
+        if result.returncode == 0:
+            click.echo(result.stdout or "Done.")
+        else:
+            click.echo((result.stderr or result.stdout or "RAG index build failed.").strip(), err=True)
 
+
+def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
+    """Run pull from sources.yaml (in DRAFT_HOME). When quiet, only echo summary lines (for UI console)."""
+    from lib.paths import ensure_sources_yaml
+    sources_yaml = ensure_sources_yaml(draft_root)
     _normalize_sources_yaml(sources_yaml)
     repos = parse_repos_yaml(sources_yaml)
     if not repos:
@@ -469,13 +507,11 @@ def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
 
 
 def do_add_repo(draft_root: Path, add_arg: str, verbose: bool, quiet: bool = False) -> None:
-    """Add a repo to sources.yaml and run pull (including the new repo).
+    """Add a repo to sources.yaml (in DRAFT_HOME) and run pull (including the new repo).
     add_arg can be: local path, repo name (../name), or GitHub URL (no clone).
     """
-    sources_yaml = draft_root / "sources.yaml"
-    if not sources_yaml.is_file():
-        sources_yaml.write_text("repos:\n")
-
+    from lib.paths import ensure_sources_yaml
+    sources_yaml = ensure_sources_yaml(draft_root)
     existing = parse_repos_yaml(sources_yaml)
     add_arg = add_arg.strip()
 
@@ -494,6 +530,7 @@ def do_add_repo(draft_root: Path, add_arg: str, verbose: bool, quiet: bool = Fal
         click.echo(f"Added {name} -> {source_path} (pull fetches .md from GitHub)")
         click.echo()
         do_pull(draft_root, verbose, quiet=quiet)
+        _run_index_for_ai_if_ready(draft_root, quiet)
         return
 
     if _is_path_like(add_arg):
@@ -518,6 +555,7 @@ def do_add_repo(draft_root: Path, add_arg: str, verbose: bool, quiet: bool = Fal
     click.echo(f"Added {name} -> {source_path}" + (f" ({git_url})" if git_url else ""))
     click.echo()
     do_pull(draft_root, verbose, quiet=quiet)
+    _run_index_for_ai_if_ready(draft_root, quiet)
 
 
 @click.command()
