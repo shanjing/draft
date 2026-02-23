@@ -82,3 +82,6 @@ Design documents in `docs/`:
 - [Intelligence layer design](docs/intelligence-layer-design.md) — embeddings, Chroma, LLM, RAG
 - [Local oracle design](docs/local-oracle-design.md) — when a local LLM is required
 - [Testing suite](docs/testing-suites.md) - testing suite
+  
+<img width="1383" height="936" alt="draft-screenshot" src="https://github.com/user-attachments/assets/d43b43f1-ba37-44ed-bfbe-681d1de2969e" />
+
