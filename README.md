@@ -71,3 +71,11 @@ Design docs are in **`docs/`**:
 - [Intelligence layer design](docs/intelligence-layer-design.md) — embeddings, Chroma, LLM, RAG
 - [Local oracle design](docs/local-oracle-design.md) — when a local LLM is required
 - [Testing suite](docs/testing-suites.md) — test layers and commands
+- [Testing suite](docs/testing-suites.md) - testing suite
+  
+
+<img width="1343" height="989" alt="Screenshot 2026-02-23 at 11 03 38 AM" src="https://github.com/user-attachments/assets/794c37ad-f018-4305-a72c-8ccb5c9b3cb9" />
+
+<img width="1383" height="936" alt="draft-screenshot" src="https://github.com/user-attachments/assets/d43b43f1-ba37-44ed-bfbe-681d1de2969e" />
+
+
