@@ -6,8 +6,7 @@ Vault and .doc_sources paths are under DRAFT_HOME (~/.draft).
 import re
 from pathlib import Path
 
-from lib.manifest import build_manifest
-from lib.manifest import _parse_sources_yaml  # same parser used by manifest/pull/app
+from lib.manifest import build_manifest, parse_sources_yaml
 from lib.paths import get_doc_sources_root, get_vault_root
 
 
@@ -43,7 +42,7 @@ def verify_sources_yaml(
         errors.append("Missing or malformed top-level 'repos:' line")
         return False, errors, warnings
 
-    repos = _parse_sources_yaml(path)
+    repos = parse_sources_yaml(path)
 
     if not repos:
         warnings.append("No repos defined (add repo blocks under 'repos:')")

@@ -49,37 +49,10 @@ except ImportError:
     pass
 
 from lib.log import logger, configure as configure_log
+from lib.manifest import parse_sources_yaml
 from lib.paths import get_doc_sources_root, get_vault_root, ensure_vault_ready, ensure_sources_yaml, get_sources_yaml_path
 
 configure_log()
-
-
-def _parse_repos_yaml(path: Path) -> dict:
-    import re
-    lines = path.read_text().splitlines()
-    repos = {}
-    name = None
-    source = None
-    url = None
-    for line in lines:
-        m = re.match(r"^\s{2,}([A-Za-z0-9_.-]+):\s*$", line)
-        m_s = re.match(r"^\s+source:\s*(.+)$", line)
-        m_u = re.match(r"^\s+url:\s*(.+)$", line)
-        if m and "source" not in line and "url" not in line:
-            if name and source is not None:
-                repos[name] = {"source": source.strip(), "url": (url.strip() or None) if url else None}
-            name = m.group(1)
-            source = None
-            url = None
-            if name in ("repos", "source"):
-                name = None
-        elif m_s and name:
-            source = m_s.group(1)
-        elif m_u and name:
-            url = m_u.group(1)
-    if name and source is not None:
-        repos[name] = {"source": source.strip(), "url": (url.strip() or None) if url else None}
-    return repos
 
 
 def _remove_repo_from_sources_yaml(path: Path, repo_name: str) -> bool:
@@ -217,7 +190,7 @@ def get_tree() -> list:
     sources_yaml = ensure_sources_yaml(DRAFT_ROOT)
     if not sources_yaml.is_file():
         return []
-    repos = _parse_repos_yaml(sources_yaml)
+    repos = parse_sources_yaml(sources_yaml)
     doc_sources = _doc_sources_root()
     result = []
     for name in repos:
@@ -501,7 +474,7 @@ def api_remove_source(body: RemoveSourceBody):
             return {"ok": False, "error": "Vault cannot be removed.", "logs": logs}
 
         sources_yaml = ensure_sources_yaml(DRAFT_ROOT)
-        repos = _parse_repos_yaml(sources_yaml)
+        repos = parse_sources_yaml(sources_yaml)
         if name not in repos:
             return {"ok": False, "error": f"Source '{name}' is not tracked.", "logs": logs}
 
