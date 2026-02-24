@@ -15,7 +15,7 @@ MANIFEST_DIR = ".draft"
 MANIFEST_FILENAME = "draft_config.json"
 
 
-def _parse_sources_yaml(path: Path) -> dict[str, dict]:
+def parse_sources_yaml(path: Path) -> dict[str, dict]:
     """Parse sources.yaml: { name: {"source": str, "url": str | None} }."""
     if not path.is_file():
         return {}
@@ -74,7 +74,7 @@ def build_manifest(draft_root: Path, sources_yaml_path: Path | None = None) -> d
     """Build manifest dict from sources.yaml and resolved paths. No I/O except read yaml.
     If sources_yaml_path is None, read from DRAFT_HOME/sources.yaml."""
     sources_yaml = sources_yaml_path if sources_yaml_path is not None else get_sources_yaml_path()
-    repos = _parse_sources_yaml(sources_yaml)
+    repos = parse_sources_yaml(sources_yaml)
     sources: dict[str, dict] = {}
     for name, repo in repos.items():
         src = repo.get("source") or ""

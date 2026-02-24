@@ -49,37 +49,10 @@ VAULT_DIR = "vault"
 # Doc sources and vault live under DRAFT_HOME (~/.draft)
 try:
     from lib.paths import get_doc_sources_root
+    from lib.manifest import parse_sources_yaml
 except ImportError:
     def get_doc_sources_root() -> Path:
         return Path.home() / ".draft" / DOC_SOURCES_DIR
-
-
-def parse_repos_yaml(path: Path) -> dict[str, dict]:
-    """Parse sources.yaml: { name: {"source": str, "url": str | None} }."""
-    lines = path.read_text().splitlines()
-    repos: dict[str, dict] = {}
-    name = None
-    source = None
-    url = None
-    for line in lines:
-        m_name = re.match(r"^\s{2,}([A-Za-z0-9_.-]+):\s*$", line)
-        m_source = re.match(r"^\s+source:\s*(.+)$", line)
-        m_url = re.match(r"^\s+url:\s*(.+)$", line)
-        if m_name and "source" not in line and "url" not in line:
-            if name and source is not None:
-                repos[name] = {"source": source.strip(), "url": (url.strip() or None) if url else None}
-            name = m_name.group(1)
-            source = None
-            url = None
-            if name in ("repos", "source"):
-                name = None
-        elif m_source and name:
-            source = m_source.group(1)
-        elif m_url and name:
-            url = m_url.group(1)
-    if name and source is not None:
-        repos[name] = {"source": source.strip(), "url": (url.strip() or None) if url else None}
-    return repos
 
 
 def get_git_remote_url(repo_path: Path) -> str | None:
@@ -398,7 +371,7 @@ def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
     from lib.paths import ensure_sources_yaml
     sources_yaml = ensure_sources_yaml(draft_root)
     _normalize_sources_yaml(sources_yaml)
-    repos = parse_repos_yaml(sources_yaml)
+    repos = parse_sources_yaml(sources_yaml)
     if not repos:
         click.echo("No repos listed in sources.yaml")
         return
@@ -513,7 +486,7 @@ def do_add_repo(draft_root: Path, add_arg: str, verbose: bool, quiet: bool = Fal
     """
     from lib.paths import ensure_sources_yaml
     sources_yaml = ensure_sources_yaml(draft_root)
-    existing = parse_repos_yaml(sources_yaml)
+    existing = parse_sources_yaml(sources_yaml)
     add_arg = add_arg.strip()
 
     # GitHub URL: add source as URL (no local clone); pull will fetch .md via API
