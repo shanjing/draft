@@ -216,9 +216,9 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     BATCH_SIZE = int(cfg["batch_size"])
     EMBED_BATCH_SIZE = int(cfg["embed_batch_size"])
     starts = range(0, len(chunks), BATCH_SIZE)
-    if verbose and tqdm is not None:
-        total_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
-        starts = tqdm(starts, total=total_batches, desc=f"Index ({mode})", unit="batch", leave=True)
+    pbar = None
+    if tqdm is not None:
+        pbar = tqdm(total=len(chunks), desc="Build RAG/vector index", unit="chunk", leave=True)
 
     for start in starts:
         end = min(start + BATCH_SIZE, len(chunks))
@@ -245,8 +245,12 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
             metadatas=metadatas,
             documents=texts,
         )
-        if verbose and tqdm is None:
+        if pbar is not None:
+            pbar.update(len(batch))
+        elif verbose:
             print(f"  Added {end}/{len(chunks)} chunks...")
+    if pbar is not None:
+        pbar.close()
 
     if verbose:
         print(f"Indexed {len(chunks)} chunks into {persist_dir}")
