@@ -29,7 +29,7 @@ alwaysApply: true
 
 - Copy only **`.md`** files; preserve directory structure (e.g. `docs/foo.md` → `~/.draft/.doc_sources/<RepoName>/docs/foo.md`).
 - Create only directories that contain at least one copied `.md`.
-- **Exclude:** top-level `README.md`, `CLAUDE.md`, `.claude/`, `.cursor/`, `.pytest_cache/`, `.venv/`, `.git/`, `__pycache__/`, `.tmp/`, `.adk/`.
+- **Exclude:** top-level `README.md`, `CLAUDE.md`, `.claude/`, `.cursor/`, `.vscode/`, `.pytest_cache/`, `.venv/`, `.git/`, `__pycache__/`, `.tmp/`, `.adk/`.
 
 # scripts/pull.py options
 

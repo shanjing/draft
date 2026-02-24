@@ -1,16 +1,12 @@
 # Draft
 
-Draft is a personal documentation hub that pulls document files from your other repos and GitHub
-projects into one browsable place. It gives you a unified view of scattered docs — engineering
-notes, design specs, drafts — with full-text search and an AI assistant that answers questions
-directly from your content.                                                                      
+Draft is a personal documentation hub. It pulls document files from your other repos and GitHub projects into one browsable place. You get a unified view of scattered docs — engineering notes, design specs, drafts — with full-text search and an AI assistant that answers questions from your content.
 
-No cloud sync. Your docs stay local. Works with or without any LLM — Ollama for fully offline use, or 
-Claude, OpenAI, and Gemini.
+No cloud sync. Your docs stay local. Draft works with or without an LLM — Ollama for fully offline use, or Claude, OpenAI, and Gemini.
 
-Draft is alo a MCP server. [TODO] 
+Draft is also an MCP server. [TODO]
 
-## Get started (the quickest way)
+## Get started (quickest way)
 
 ```bash
 ./setup.sh
@@ -18,23 +14,23 @@ Draft is alo a MCP server. [TODO]
 
 ## Start it manually
 
-```
+```bash
 source .venv/bin/activate
-python scripts/serve.py     # start UI at http://localhost:8058
+python scripts/serve.py   # UI at http://localhost:8058
 ```
 
-## Run draft as a local Docker container:
+## Run Draft as a local Docker container
 
 ```bash
 docker build -t draft-ui .
 docker run -p 8058:8058 draft-ui
-#Open **http://localhost:8058**.
+# Open http://localhost:8058
 ```
 
 
 ## Where documents are stored (`~/.draft`)
 
-Document data and config live under **`~/.draft/`** (or **`DRAFT_HOME`** if set): **`sources.yaml`** (your source list), **`.doc_sources/`** (one subdir per pulled repo), and **`vault/`** (curated docs). The repo holds only code. Set **`DRAFT_HOME`** to use a different data root (default is **`~/.draft`**).
+Document data and config live under **`~/.draft/`** (or **`DRAFT_HOME`** if set): **`sources.yaml`** (source list), **`.doc_sources/`** (one subdir per pulled repo), and **`vault/`** (curated docs). The repo holds only code. Set **`DRAFT_HOME`** to use a different data root (default **`~/.draft`**).
 
 
 ## sources.yaml (your config)
@@ -46,16 +42,11 @@ Document data and config live under **`~/.draft/`** (or **`DRAFT_HOME`** if set)
   - **Local path** — e.g. `../my_notes` or `/path/to/repo`.
   - **GitHub URL** — e.g. `https://github.com/owner/repo`. Pull fetches `.md` files via the GitHub API (no clone).
 
-## Adding Document Sources
+## Adding document sources
 
-The quickest way:
-```
-./setup.sh
-```
+**Quickest way:** run **`./setup.sh`**.
 
-Add a source from the UI (**Add source** in the sidebar)
-
-Add sources from the CLI:
+You can also add a source from the UI (**Add source** in the sidebar) or from the CLI:
 ```bash
 python scripts/pull.py -a ../OtherRepo
 python scripts/pull.py -a https://github.com/owner/repo
@@ -64,21 +55,19 @@ python scripts/pull.py -a https://github.com/owner/repo
 
 ## Ask (AI) over your docs
 
-The **Ask (AI)** panel (top of the content area) answers questions using only your indexed docs (RAG).
-To do that ou need a local LLM model (ollama) or an API from major cloud LLM providers. The setup.sh will let you choose the model and enter the API key.
+The **Ask (AI)** panel (top of the content area) answers questions using only your indexed docs (RAG). To use it you need a local LLM (Ollama) or an API key from a cloud provider. **`./setup.sh`** lets you choose the model and enter the API key.
 
-
-No local LLM is needed for the rest of Draft (tree, search, pull, add source). See `docs/local-oracle-design.md` for details.
+No LLM is needed for the rest of Draft — tree, search, pull, add source. See **`docs/local-oracle-design.md`** for details.
 
 ## Vault
 
-The **vault** source lives at **`~/.draft/vault/`** (or `$DRAFT_HOME/vault/`). It is separate from `.doc_sources/` so it can later be pointed at encrypted S3, iCloud, etc. Files are encrypted (TODO).
+The **vault** lives at **`~/.draft/vault/`** (or **`$DRAFT_HOME/vault/`**). It is separate from **`.doc_sources/`** so it can later be pointed at encrypted S3, iCloud, etc. File encryption is TODO.
 
 ## Engineering
 
-Design documents in `docs/`:
+Design docs are in **`docs/`**:
 
 - [Storage & metadata design](docs/storage-and-metadata-design.md) — access layer, vault, sources.yaml, reconnection
 - [Intelligence layer design](docs/intelligence-layer-design.md) — embeddings, Chroma, LLM, RAG
 - [Local oracle design](docs/local-oracle-design.md) — when a local LLM is required
-- [Testing suite](docs/testing-suites.md) - testing suite
+- [Testing suite](docs/testing-suites.md) — test layers and commands

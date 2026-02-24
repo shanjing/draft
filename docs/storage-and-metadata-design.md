@@ -2,7 +2,7 @@
 
 **Scope:** Storage layer + access layer. 
 
-**Goal:** re-connect with storage after it is detached using content identity (hashing) and path mapping; support future browser-drop with URL as source.
+**Goal:** Reconnect with storage after it is detached — use content identity (hashing) and path mapping. Support future browser-drop with URL as source.
 
 **Data locations:** Doc data and config live under **`~/.draft/`** (or **`DRAFT_HOME`**, default **`~/.draft`**): **`sources.yaml`** (source list), **`.doc_sources/<source_id>/`** (pulled sources), and **`vault/`**. The repo root holds code only. **`sources.example.yaml`** is the checked-in template; setup and app create **`~/.draft/sources.yaml`** from it when missing.
 
@@ -10,7 +10,7 @@
 
 **Vault** lives in **`~/.draft/vault/`** (outside `.doc_sources/`). 
 
-**metadata layer:** The tree, search, and Ask read vault from `~/.draft/vault/` and other docs from `~/.draft/.doc_sources/`. This design **adds a meta layer on top**—manifest, file registry, content hashing—for reconnection and portability; it works along with the existing "sync into .doc_sources" flow.
+**Metadata layer:** The tree, search, and Ask read vault from **`~/.draft/vault/`** and other docs from **`~/.draft/.doc_sources/`**. This design **adds a meta layer on top** — manifest, file registry, content hashing — for reconnection and portability. It works along with the existing "sync into .doc_sources" flow.
 
 ---
 
@@ -87,11 +87,11 @@ flowchart TB
 
 ## 1. Principles
 
-- **Draft "watches" files** — it does not own them. Sources live on external drive, iCloud, GitHub, etc. Pull/copy still populates `~/.draft/.doc_sources/` with the resulting `.md` files.
-- **Content identity over path** — we track files by a **content hash** (SHA-256). When the path changes (e.g. drive moved), we **re-link** existing vectors to the new path instead of re-indexing.
+- **Draft "watches" files** — it does not own them. Sources live on external drive, iCloud, GitHub, etc. Pull/copy still populates **`~/.draft/.doc_sources/`** with the resulting **`.md`** files.
+- **Content identity over path** — We track files by a **content hash** (SHA-256). When the path changes (e.g. drive moved), we **re-link** existing vectors to the new path instead of re-indexing.
 - **Manifest is the single source of truth** for "what sources exist and where they map." It is portable and can live next to the vault or in a known location so the thin client can re-attach.
-- **Meta layer only** — Manifest, file registry, and hashes are additive. Reading and serving docs come from `~/.draft/vault/` and `~/.draft/.doc_sources/`; the meta layer enables re-link and future features without changing how files get there.
-- **Vault is separate** — Vault is not under `.doc_sources/`. It lives at **`~/.draft/vault/`** (or `DRAFT_HOME/vault/`) so it can later be pointed at an encrypted S3 bucket, iCloud Drive, etc. **`~/.draft/.doc_sources/`** remains a plain filesystem for pulled/copied docs.
+- **Meta layer only** — Manifest, file registry, and hashes are additive. Reading and serving docs come from **`~/.draft/vault/`** and **`~/.draft/.doc_sources/`**. The meta layer enables re-link and future features without changing how files get there.
+- **Vault is separate** — Vault is not under **`.doc_sources/`**. It lives at **`~/.draft/vault/`** (or **`DRAFT_HOME/vault/`**) so it can later be pointed at encrypted S3, iCloud Drive, etc. **`~/.draft/.doc_sources/`** remains a plain filesystem for pulled/copied docs.
 
 ---
 
@@ -129,9 +129,9 @@ The following vault behavior is implemented and reflected in the diagram above.
 
 ### 2.1 Single source of truth: avoid double sync
 
-**The friction:** Having both `sources.yaml` (human) and `draft_config.json` (machine) creates two sources of truth. If both are edited, they can drift and require manual sync—not optimal.
+**The friction:** Having both **`sources.yaml`** (human) and **`draft_config.json`** (machine) creates two sources of truth. If both are edited, they can drift and require manual sync — not optimal.
 
-**Recommendation: one canonical, one derived.**
+**Recommendation:** One canonical, one derived.
 
 - **`sources.yaml` is the only human-edited config.** People (and the UI/CLI add-source flow) add or change sources here. It stays minimal: repo name, `source` (path or URL), optional `url`.
 - **`draft_config.json` is always generated**, never hand-edited. The access layer (or a small job) produces it from:
