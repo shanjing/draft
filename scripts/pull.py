@@ -34,6 +34,7 @@ EXCLUDE_BASENAME = {"CLAUDE.md"}
 EXCLUDE_DIRS = (
     ".claude",
     ".cursor",
+    ".vscode",
     ".pytest_cache",
     ".venv",
     ".git",

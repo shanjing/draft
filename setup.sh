@@ -205,7 +205,8 @@ if ! (cd "$SCRIPT_DIR" && "$PYTHON" scripts/verify_sources.py -r "$SCRIPT_DIR" -
   (cd "$SCRIPT_DIR" && "$PYTHON" scripts/verify_sources.py -r "$SCRIPT_DIR" 2>&1) || true
   exit 1
 fi
-read -r -p "Add new sources? (y/n): " add_sources
+read -r -p "Add new doc sources? You can always add later from the UI. (y/N): " add_sources
+add_sources="${add_sources:-n}"
 case "$add_sources" in
   [yY]|[yY][eE][sS])
     export DRAFT_SETUP=1
@@ -246,7 +247,8 @@ case "$add_sources" in
       fi
       printf "  ${G}✓${N} Repo is reachable. .md files will be fetched from GitHub (no local clone).\n"
       echo ""
-      read -r -p "Add this GitHub source? (y/n): " yn
+      read -r -p "Add this GitHub source? (y/N): " yn
+      yn="${yn:-n}"
       case "$yn" in
         [yY]|[yY][eE][sS])
           (cd "$SCRIPT_DIR" && "$PYTHON" scripts/pull.py -a "$src_path")
@@ -276,7 +278,8 @@ case "$add_sources" in
       (cd "$SCRIPT_DIR" && "$PYTHON" scripts/pull.py -r "$resolved") 2>/dev/null | head -30 || true
     fi
     echo ""
-    read -r -p "Add this source? (y/n): " yn
+    read -r -p "Add this source? (y/N): " yn
+    yn="${yn:-n}"
     case "$yn" in
       [yY]|[yY][eE][sS])
         (cd "$SCRIPT_DIR" && "$PYTHON" scripts/pull.py -a "$add_arg")
@@ -322,7 +325,8 @@ verify_openai_key() {
 }
 
 # --- Optional: Ask (AI) LLM configuration ---
-read -r -p "Configure Ask (AI) LLM? (y/n): " config_llm
+read -r -p "Configure LLM for AI assistant? This will need an API key or local model. (y/N): " config_llm
+config_llm="${config_llm:-n}"
 case "$config_llm" in
   [yY]|[yY][eE][sS])
     echo ""
@@ -438,7 +442,7 @@ case "$config_llm" in
     done
     echo ""
     ;;
-  *) ;;
+  *) echo "Received non-y/n response. Skipping LLM configuration.";;
 esac
 
 printf "${G}✓ .venv ready.${N}\n"
@@ -449,8 +453,8 @@ echo ""
 # Build RAG/vector index if a valid LLM is configured; ask user first
 if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/check_llm_ready.py 2>/dev/null); then
   while true; do
-    read -r -p "RAG/index is required to use the AI feature, do you want to build it now? You can always build it in the UI later. (y/n): " build_rag
-    build_rag="$(printf '%s' "$build_rag" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    read -r -p "RAG/index is required to use the AI feature, do you want to build it now? You can always build it in the UI later. (y/N): " build_rag
+    build_rag="$(printf '%s' "${build_rag:-n}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     case "$build_rag" in
       y|yes) build_rag=1; break ;;
       n|no)  build_rag=0; break ;;
@@ -479,7 +483,8 @@ if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/check_llm_ready.py 2>/dev/null); then
   fi
 fi
 echo ""
-read -r -p "Start the Draft UI? (y/n): " start_ui
+read -r -p "Start the Draft UI? (Y/n): " start_ui
+start_ui="${start_ui:-y}"
 case "$start_ui" in
   [yY]|[yY][eE][sS])
     _UI_LOG="${SCRIPT_DIR}/.draft-ui.log"
@@ -489,4 +494,10 @@ case "$start_ui" in
     printf "  ${G}Draft UI started in background${N} (PID %s). Log: %s\n" "$_UI_PID" "$_UI_LOG"
     printf "  ${D}Stop with: kill %s${N}\n" "$_UI_PID"
     ;;
+  *)
+    printf "${D}Skipped.${N}\n"
+    printf "You can start Draft later by running this setup.sh again or by running:\n"
+    printf "  source .venv/bin/activate\n"
+    printf "  python scripts/serve.py\n"
+    echo ""
 esac

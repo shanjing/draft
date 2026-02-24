@@ -38,10 +38,10 @@ flowchart LR
 
 **Data flow:**
 
-- **Search:** Storage → Whoosh index (build from `~/.draft/vault/` + `~/.draft/.doc_sources/`) → GET `/api/search?q=...` → results with repo, path, snippet.
+- **Search:** Storage → Whoosh index (build from **`~/.draft/vault/`** + **`~/.draft/.doc_sources/`**) → **GET /api/search?q=...** → results with repo, path, snippet.
 - **Ask:** Storage → chunking → embed → Chroma; at query time: embed query → Chroma similarity → top-k chunks → LLM with context → streamed answer + citations.
 
-Indexes are **rebuilt on demand** (no incremental updates today). Search index is rebuilt when the user runs **Pull** from the UI or **Reindex**; vector index is rebuilt only when the user runs **Rebuild AI index** or `scripts/index_for_ai.py`.
+Indexes are **rebuilt on demand** (no incremental updates today). Search index is rebuilt when the user runs **Pull** from the UI or **Reindex**. Vector index is rebuilt only when the user runs **Rebuild AI index** or **`scripts/index_for_ai.py`**.
 
 ---
 
@@ -189,7 +189,7 @@ Setup: `setup.sh` “Configure Ask (AI) LLM” and `scripts/setup_env_writer.py`
 | **Rebuild AI index (UI)** | No | Rebuilt |
 | **scripts/index_for_ai.py** | No | Rebuilt |
 
-So: **search** is updated when the user pulls or reindexes from the UI; **Ask** is updated only when the user explicitly rebuilds the AI index. There is no single “refresh everything” pipeline today (see storage-and-metadata-design.md §7.5).
+So: **Search** is updated when the user pulls or reindexes from the UI; **Ask** is updated only when the user explicitly rebuilds the AI index. There is no single “refresh everything” pipeline today (see storage-and-metadata-design.md §7.5).
 
 ---
 
@@ -204,7 +204,7 @@ Both **search** and **ingest** read from:
 
 - Top-level filename: `README.md` (excluded in ingest/pull).
 - Basename: `CLAUDE.md`.
-- Directory names: `.claude`, `.cursor`, `.pytest_cache`, `.venv`, `.git`, `__pycache__`, `.tmp`, `.adk`.
+- Directory names: `.claude`, `.cursor`, `.vscode`, `.pytest_cache`, `.venv`, `.git`, `__pycache__`, `.tmp`, `.adk`.
 
 Aligning search with these exclusions is a possible improvement so search and Ask see the same set of files.
 

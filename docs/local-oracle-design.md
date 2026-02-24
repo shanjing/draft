@@ -1,15 +1,15 @@
 # Design: The Local Oracle
 
-A local RAG-based assistant over your scattered private draft docs: sharp, direct, contextually aware, and without exposing your notes to the public cloud.
+A local RAG-based assistant over your scattered private draft docs — sharp, direct, contextually aware, and without exposing your notes to the public cloud.
 
 ---
 
 ## Goals
 
 - **Answer questions** using only the content of your own collected files.
-- **Cite sources**: every answer links back to the original docs.
-- **No leakage**: support a fully local path (embeddings + LLM) so nothing leaves your machine; optionally use Claude API for higher quality.
-- **MCP Server**: can be an MCP for your other agents
+- **Cite sources** — every answer links back to the original docs.
+- **No leakage** — support a fully local path (embeddings + LLM) so nothing leaves your machine; optionally use Claude API for higher quality.
+- **MCP Server** — can act as an MCP for your other agents.
 ---
 
 ## Architecture Overview
@@ -171,10 +171,10 @@ Store the exact chunk text in the index (or a stable reference) so retrieval can
 
 ## Is Draft ready to use?
 
-- **Without AI (no local LLM):** Yes. The  UI (tree, doc viewer, Pull, Add source, full-text Whoosh search) works. Run `./setup.sh` then `python scripts/serve.py`; open http://localhost:8058.
-- **With Ask (AI) — needs two things:**
-  1. **AI index:** Run `python scripts/index_for_ai.py` once (and after Pull). Requires **Python 3.11 or 3.12**; ChromaDB does not support Python 3.14+ yet. The script downloads the embedding model (nomic-embed-text) on first run.
-  2. **LLM:** Either set **ANTHROPIC_API_KEY** (Claude) or run **Ollama** locally. For Ollama, the default model is **qwen3:8b**. Pull it once: `ollama run qwen3:8b`. Override with env: `OLLAMA_MODEL=qwen2.5-coder:32b` (or another model).
+- **Without AI (no local LLM):** Yes. The UI (tree, doc viewer, Pull, Add source, full-text Whoosh search) works. Run **`./setup.sh`** then **`python scripts/serve.py`**; open http://localhost:8058.
+- **With Ask (AI)** — you need two things:
+  1. **AI index:** Run **`python scripts/index_for_ai.py`** once (and after Pull). Requires **Python 3.11 or 3.12** — ChromaDB does not support Python 3.14+ yet. The script downloads the embedding model (nomic-embed-text) on first run.
+  2. **LLM:** Either set **ANTHROPIC_API_KEY** (Claude) or run **Ollama** locally. For Ollama the default model is **qwen3:8b**. Pull it once: **`ollama run qwen3:8b`**. Override with env: **`OLLAMA_MODEL=qwen2.5-coder:32b`** (or another model).
 
 **Quick test with Ollama (qwen3:8b):**
 
@@ -193,9 +193,9 @@ If you only have Python 3.14, the index script and `/api/ask` will fail until Ch
 
 ## Implementation Notes
 
-- **Python**: ChromaDB has compatibility issues with Python 3.14+ (Pydantic v1). Use Python 3.11 or 3.12 for `index_for_ai.py` and for the app if you use Ask (AI).
-- **First run**: `scripts/index_for_ai.py` downloads the embedding model (nomic-embed-text) on first run; ensure network access.
-- **Ollama model**: Default is `qwen3:8b`. Set `OLLAMA_MODEL` to use another model (e.g. `qwen2.5-coder:32b`).
+- **Python:** ChromaDB has compatibility issues with Python 3.14+ (Pydantic v1). Use Python 3.11 or 3.12 for **`index_for_ai.py`** and for the app if you use Ask (AI).
+- **First run:** **`scripts/index_for_ai.py`** downloads the embedding model (nomic-embed-text) on first run; ensure network access.
+- **Ollama model:** Default is **`qwen3:8b`**. Set **`OLLAMA_MODEL`** to use another model (e.g. **`qwen2.5-coder:32b`**).
 
 ## Document History
 
