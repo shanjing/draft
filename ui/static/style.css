@@ -246,7 +246,7 @@ body[data-theme="bright"] .sidebar-resize:active {
   font-family: "Material Symbols Outlined", sans-serif;
   font-weight: normal;
   font-style: normal;
-  font-size: 1.25em;
+  font-size: 1.875em;
   line-height: 1;
   display: inline-block;
   vertical-align: middle;
@@ -256,14 +256,14 @@ body[data-theme="bright"] .sidebar-resize:active {
 
 .btn-icon {
   padding: 0.55rem 0.75rem;
-  font-size: 1.25rem;
+  font-size: 1.875rem;
   line-height: 1;
   min-width: 2.5rem;
   min-height: 2.5rem;
 }
 
 .btn-icon .material-symbols-outlined {
-  font-size: 1.25rem;
+  font-size: 1.875rem;
 }
 
 .btn-search {
@@ -277,7 +277,7 @@ body[data-theme="bright"] .sidebar-resize:active {
 }
 
 .btn-search .material-symbols-outlined.btn-search-icon {
-  font-size: 1.1rem;
+  font-size: 1.65rem;
   opacity: 0.95;
 }
 
@@ -288,12 +288,12 @@ body[data-theme="bright"] .sidebar-resize:active {
 }
 
 .btn-icon-text .material-symbols-outlined {
-  font-size: 1.1rem;
+  font-size: 1.65rem;
 }
 
 .btn-icon-text .toolbar-btn-icon {
   display: inline-block;
-  font-size: 1rem;
+  font-size: 1.5rem;
   line-height: 1;
   width: 1.2em;
   text-align: center;
@@ -337,6 +337,14 @@ body[data-theme="bright"] .sidebar-resize:active {
   padding: 0 0.5rem 0.5rem;
   border-bottom: 1px solid var(--border);
   margin-bottom: 0.5rem;
+}
+
+.sidebar-toolbar .btn-icon {
+  font-size: 0.9375rem;
+}
+.sidebar-toolbar .btn-icon .material-symbols-outlined,
+.sidebar-toolbar .btn-icon .toolbar-btn-icon {
+  font-size: 0.9375rem;
 }
 
 .btn {
@@ -416,7 +424,7 @@ body[data-theme="bright"] .sidebar-resize:active {
 }
 
 .tree .vault-icon {
-  font-size: 1rem;
+  font-size: 1.5rem;
   line-height: 1;
 }
 
@@ -502,9 +510,10 @@ body[data-theme="bright"] .sidebar-resize:active {
 .tree .btn-repo-down .repo-btn-icon,
 .tree .btn-repo-bookmark .repo-btn-icon {
   display: inline-block;
+  font-size: 1.5rem;
 }
 .tree .btn-repo-bookmark .repo-btn-icon {
-  font-size: 1rem;
+  font-size: 1.5rem;
   line-height: 1;
 }
 /* Pin emoji: tint to yellow when pinned via filter (emoji ignores color) */
@@ -550,7 +559,7 @@ body[data-theme="bright"] .sidebar-resize:active {
   line-height: 1;
 }
 .tree .btn-repo-remove .repo-btn-icon {
-  font-size: 0.85rem;
+  font-size: 1.275rem;
 }
 .tree .btn-repo-down {
   margin-left: 0;
@@ -611,7 +620,7 @@ body[data-theme="bright"] .sidebar-resize:active {
   margin-left: 0.1rem;
   border-radius: 0;
   line-height: inherit;
-  font-size: 0.8125rem;
+  font-size: 1.21875rem;
   vertical-align: baseline;
 }
 
