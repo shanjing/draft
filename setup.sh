@@ -197,24 +197,194 @@ ensure_sources_yaml() {
   fi
 }
 
+# Collect repo names from sources.yaml (names that have a source: line). One per line.
+list_repo_names_in_yaml() {
+  [ ! -f "$SOURCES_YAML" ] && return
+  awk '
+    /^[[:space:]]{2,}[A-Za-z0-9_.-]+[[:space:]]*:[[:space:]]*$/ {
+      n = $1; gsub(/^[[:space:]]+|[[:space:]]*:[[:space:]]*$/, "", n);
+      if (n != "repos" && n != "source") name = n;
+      next;
+    }
+    /^[[:space:]]+source:[[:space:]]/ && name != "" {
+      print name;
+      name = "";
+      next;
+    }
+  ' "$SOURCES_YAML" 2>/dev/null
+}
+
+# Make sources.yaml follow actual content: add entries for vault (if dir exists) and for each
+# .doc_sources subdir that is not in sources.yaml. True source of truth for content is disk;
+# sources.yaml is source of truth only among config files.
+sync_sources_yaml_from_content() {
+  [ ! -f "$SOURCES_YAML" ] && return
+  local added=0
+  # Ensure vault entry exists when vault dir exists
+  if [ -d "$DRAFT_HOME/vault" ] && ! list_repo_names_in_yaml | grep -Fxq "vault" 2>/dev/null; then
+    printf "  ${D}Adding vault to sources.yaml (vault dir exists).${N}\n"
+    printf '\n  vault:\n    source: ./vault\n' >> "$SOURCES_YAML"
+    added=1
+  fi
+  # Add each .doc_sources subdir that is not in sources.yaml (use absolute path so pull resolves correctly)
+  if [ -d "$DRAFT_HOME/.doc_sources" ]; then
+    for subdir in "$DRAFT_HOME/.doc_sources"/*/; do
+      [ -d "$subdir" ] || continue
+      name="$(basename "$subdir")"
+      if list_repo_names_in_yaml | grep -Fxq "$name" 2>/dev/null; then
+        continue
+      fi
+      printf "  ${D}Adding %s to sources.yaml (.doc_sources/%s exists).${N}\n" "$name" "$name"
+      printf '\n  %s:\n    source: %s/.doc_sources/%s\n' "$name" "$DRAFT_HOME" "$name" >> "$SOURCES_YAML"
+      added=1
+    done
+  fi
+  if [ "$added" = "1" ]; then
+    printf "${D}sources.yaml updated to match on-disk content.${N}\n"
+  fi
+}
+
+# Check consistency between sources.yaml and disk. Warn only when yaml lists something missing
+# on disk (do not auto-remove; user may be about to run Pull). Orphans are already fixed by sync_sources_yaml_from_content.
+check_sources_consistency() {
+  [ ! -f "$SOURCES_YAML" ] && return
+  local name
+  local warnings=0
+  while IFS= read -r name; do
+    [ -z "$name" ] && continue
+    if [ "$name" = "vault" ]; then
+      if [ ! -d "$DRAFT_HOME/vault" ]; then
+        printf "  ${D}%s: vault listed in sources.yaml but %s/vault not found (create dir or run Pull).${N}\n" "$name" "$DRAFT_HOME"
+        warnings=1
+      fi
+    else
+      if [ ! -d "$DRAFT_HOME/.doc_sources/$name" ]; then
+        printf "  ${D}%s: listed in sources.yaml but %s/.doc_sources/%s not found (run Pull).${N}\n" "$name" "$DRAFT_HOME" "$name"
+        warnings=1
+      fi
+    fi
+  done < <(list_repo_names_in_yaml)
+  if [ "$warnings" = "1" ]; then
+    printf "${D}Consistency: see warnings above.${N}\n"
+  else
+    printf "${D}Consistency: OK.${N}\n"
+  fi
+}
+
+# Show current state for existing install: sources, vault file count, LLM config, RAG index.
+show_current_state() {
+  printf "${D}--- Current state ---${N}\n"
+  list_tracked_sources
+  local vault_count=0
+  [ -d "$DRAFT_HOME/vault" ] && vault_count="$(find "$DRAFT_HOME/vault" -type f 2>/dev/null | wc -l | tr -d ' ')"
+  printf "  ${D}Vault: %s file(s)${N}\n" "$vault_count"
+  if [ -f "$SCRIPT_DIR/.env" ]; then
+    _llm_p=$(grep -E '^[[:space:]]*DRAFT_LLM_PROVIDER[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+    _llm_m=$(grep -E '^[[:space:]]*OLLAMA_MODEL[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+    [ -z "$_llm_m" ] && _llm_m=$(grep -E '^[[:space:]]*DRAFT_LLM_MODEL[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+    if [ -n "$_llm_p" ] || [ -n "$_llm_m" ]; then
+      printf "  ${D}LLM: %s${N}\n" "${_llm_p:-ollama} / ${_llm_m:-?}"
+    else
+      printf "  ${D}LLM: not configured${N}\n"
+    fi
+    unset _llm_p _llm_m
+  else
+    printf "  ${D}LLM: not configured${N}\n"
+  fi
+  if [ -d "$SCRIPT_DIR/.vector_store" ] && [ -n "$(find "$SCRIPT_DIR/.vector_store" -type f 2>/dev/null | head -1)" ]; then
+    _rag_model=$(cd "$SCRIPT_DIR" && "$PYTHON" -c "
+import sys
+sys.path.insert(0, '.')
+try:
+    import chromadb
+    from chromadb.config import Settings
+    from lib.ingest import VECTOR_DIR, COLLECTION_NAME
+    client = chromadb.PersistentClient(path=VECTOR_DIR, settings=Settings(anonymized_telemetry=False))
+    col = client.get_collection(COLLECTION_NAME)
+    meta = getattr(col, 'metadata', None) or {}
+    # Prefer embed model name (algorithm); fall back to profile for old index
+    print(meta.get('embed_model') or meta.get('profile', '?'))
+except Exception:
+    print('')
+" 2>/dev/null) || _rag_model=""
+    _rag_model="${_rag_model:-?}"
+    printf "  ${D}RAG index: %s, freshly baked${N}\n" "$_rag_model"
+  else
+    printf "  ${D}RAG index: not built${N}\n"
+  fi
+  echo ""
+}
+
+# Detect new vs existing install. Do not use sources.yaml — initial file is copied from
+# sources.example.yaml and always contains vault + draft with source:. Use on-disk content only.
+# New = no files in .doc_sources and no files in vault. Existing = at least one file in either.
+# Return 0 = existing install, 1 = new install. Sets DRAFT_INSTALL_STATE for use by later steps.
+is_existing_install() {
+  DRAFT_INSTALL_STATE="new"
+  # Existing if .doc_sources has any subdir with at least one file
+  if [ -d "$DRAFT_HOME/.doc_sources" ]; then
+    if [ -n "$(find "$DRAFT_HOME/.doc_sources" -mindepth 2 -type f 2>/dev/null | head -1)" ]; then
+      DRAFT_INSTALL_STATE="existing"
+      return 0
+    fi
+  fi
+  # Existing if vault has at least one file
+  if [ -d "$DRAFT_HOME/vault" ]; then
+    if [ -n "$(find "$DRAFT_HOME/vault" -type f 2>/dev/null | head -1)" ]; then
+      DRAFT_INSTALL_STATE="existing"
+      return 0
+    fi
+  fi
+  return 1
+}
+
 # --- Managed sources: offer to add new sources ---
 ensure_sources_yaml
+is_existing_install || true
+export DRAFT_INSTALL_STATE
 # Verify sources.yaml before reading it (mandatory: fail if invalid)
 if ! (cd "$SCRIPT_DIR" && "$PYTHON" scripts/verify_sources.py -r "$SCRIPT_DIR" -q 2>/dev/null); then
   printf "${R}sources.yaml is invalid. Fix errors and re-run setup. Run: %s scripts/verify_sources.py -r %s${N}\n" "$PYTHON" "$SCRIPT_DIR" >&2
   (cd "$SCRIPT_DIR" && "$PYTHON" scripts/verify_sources.py -r "$SCRIPT_DIR" 2>&1) || true
   exit 1
 fi
-read -r -p "Add new doc sources? You can always add later from the UI. (y/N): " add_sources
-add_sources="${add_sources:-n}"
-case "$add_sources" in
-  [yY]|[yY][eE][sS])
-    export DRAFT_SETUP=1
-    printf "\n"
-    printf "Enter a local path (relative or absolute) or a GitHub repo URL.\n"
-    printf "Press Enter when done adding.\n"
-    echo ""
+# Make sources.yaml follow actual content (vault + .doc_sources). Content on disk is source of truth.
+printf "${D}Syncing sources.yaml from on-disk content...${N}\n"
+sync_sources_yaml_from_content
+# Sync doc sources from sources.yaml to .doc_sources (no AI index build).
+printf "${D}Syncing doc sources from sources.yaml...${N}\n"
+(cd "$SCRIPT_DIR" && "$PYTHON" scripts/pull.py -q 2>/dev/null) || true
+echo ""
 
+check_venv() { [[ -d "$SCRIPT_DIR/.venv" ]]; }
+
+# Verify API keys (read-only endpoints). Return 0 if valid.
+verify_anthropic_key() {
+  local key="$1"
+  [ -z "$key" ] && return 1
+  key="$(printf '%s' "$key" | tr -d '\n\r')"
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X GET "https://api.anthropic.com/v1/models" -H "x-api-key: ${key}" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" 2>/dev/null)" = "200" ]
+}
+verify_gemini_key() {
+  local key="$1"
+  [ -z "$key" ] && return 1
+  key="$(printf '%s' "$key" | tr -d '\n\r')"
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://generativelanguage.googleapis.com/v1beta/models?key=${key}" 2>/dev/null)" = "200" ]
+}
+verify_openai_key() {
+  local key="$1"
+  [ -z "$key" ] && return 1
+  key="$(printf '%s' "$key" | tr -d '\n\r')"
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X GET "https://api.openai.com/v1/models" -H "Authorization: Bearer ${key}" 2>/dev/null)" = "200" ]
+}
+
+# --- Action flows (used by both new-install wizard and existing-install menu) ---
+do_add_sources_flow() {
+  export DRAFT_SETUP=1
+  printf "\n"
+  printf "Enter a local path (relative or absolute) or a GitHub repo URL.\n"
+  printf "Press Enter when done adding.\n"
+  echo ""
   while true; do
     read -r -p "Document source (path or GitHub URL; Enter when done): " src_path
     src_path="${src_path#"${src_path%%[![:space:]]*}"}"
@@ -225,8 +395,6 @@ case "$add_sources" in
       echo ""
       break
     fi
-
-    # --- GitHub URL: add URL to sources.yaml; pull.py fetches .md via API (no clone) ---
     if is_github_url "$src_path"; then
       parsed="$(parse_github_url "$src_path")" || true
       if [ -z "$parsed" ]; then
@@ -258,8 +426,6 @@ case "$add_sources" in
       echo ""
       continue
     fi
-
-    # --- Local path (relative or absolute) ---
     resolve_out="$(resolve_source_path "$src_path")" || {
       printf "  ${R}Not found or not a directory: %s${N}\n" "$src_path"
       continue
@@ -288,216 +454,214 @@ case "$add_sources" in
     esac
     echo ""
   done
-
-    echo ""
-    ;;
-  *)
-    ;;
-esac
-echo ""
-
-check_venv() {
-  [[ -d .venv ]]
+  echo ""
 }
 
-printf "${D}--- Environment check ---${N}\n"
-printf "  %b\n" "$(check_venv && echo "${G}✓${N} .venv exists" || echo "${R}✗${N} .venv missing")"
-echo ""
-
-# Verify API keys (read-only endpoints). Return 0 if valid.
-verify_anthropic_key() {
-  local key="$1"
-  [ -z "$key" ] && return 1
-  key="$(printf '%s' "$key" | tr -d '\n\r')"
-  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X GET "https://api.anthropic.com/v1/models" -H "x-api-key: ${key}" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" 2>/dev/null)" = "200" ]
-}
-verify_gemini_key() {
-  local key="$1"
-  [ -z "$key" ] && return 1
-  key="$(printf '%s' "$key" | tr -d '\n\r')"
-  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://generativelanguage.googleapis.com/v1beta/models?key=${key}" 2>/dev/null)" = "200" ]
-}
-verify_openai_key() {
-  local key="$1"
-  [ -z "$key" ] && return 1
-  key="$(printf '%s' "$key" | tr -d '\n\r')"
-  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X GET "https://api.openai.com/v1/models" -H "Authorization: Bearer ${key}" 2>/dev/null)" = "200" ]
-}
-
-# --- Optional: Ask (AI) LLM configuration ---
-read -r -p "Configure LLM for AI assistant? This will need an API key or local model. (y/N): " config_llm
-config_llm="${config_llm:-n}"
-case "$config_llm" in
-  [yY]|[yY][eE][sS])
-    echo ""
-    env_file="$SCRIPT_DIR/.env"
-    llm_start=10
-    # Build Ollama list (indices 1..N) if available
-    OLLAMA_NAMES=()
-    if command -v ollama >/dev/null 2>&1; then
-      while IFS= read -r name; do
-        [ -n "$name" ] && OLLAMA_NAMES+=("$name")
-      done < <(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
-      idx=1
-      for name in "${OLLAMA_NAMES[@]}"; do
-        printf "  ${G}%d.${N} %s (Ollama)\n" "$idx" "$name"
-        idx=$((idx + 1))
-      done
-      llm_start=$idx
-    else
-      printf "${D}(Ollama not installed — local models skipped)${N}\n"
-    fi
-    first_ollama=1
-    last_ollama=$((llm_start - 1))
-    # Cloud and Other (fixed indices 10, 11, 12, 13 — or next available)
-    printf "  ${G}%d.${N} Gemini 2.5 Flash (cloud)\n" "$llm_start"
-    num_gemini=$llm_start
-    num_opus=$((llm_start + 1))
-    num_openai=$((llm_start + 2))
-    num_other=$((llm_start + 3))
-    printf "  ${G}%d.${N} Opus / Claude (cloud)\n" "$num_opus"
-    printf "  ${G}%d.${N} OpenAI low (cloud)\n" "$num_openai"
-    printf "  ${G}%d.${N} Other (enter model string)\n" "$num_other"
-    echo ""
-    max_choice=$num_other
-
-    while true; do
-      read -r -p "Choose model (1-${max_choice}): " choice
-      choice="$(printf '%s' "$choice" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-      if [ -z "$choice" ]; then
-        printf "${D}Skipped.${N}\n"
-        break
-      fi
-      if [ "$choice" -ge "$first_ollama" ] 2>/dev/null && [ "$choice" -le "$last_ollama" ] 2>/dev/null; then
-        # Ollama
-        i=$((choice - 1))
-        model_name="${OLLAMA_NAMES[i]:-}"
-        if [ -n "$model_name" ]; then
-          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode ollama --model "$model_name")
-          printf "  ${G}✓${N} Set .env: Ollama model %s\n" "$model_name"
-          break
-        fi
-        printf "  ${R}No model at that index.${N}\n"
-      elif [ "$choice" = "$num_gemini" ]; then
-        read -r -s -p "Enter Gemini API key: " api_key
-        echo ""
-        api_key="$(printf '%s' "$api_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-        if [ -z "$api_key" ]; then
-          printf "${D}Skipped.${N}\n"
-          break
-        fi
-        printf "${D}Verifying...${N}\n"
-        if verify_gemini_key "$api_key"; then
-          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode gemini --model "gemini-2.5-flash" --api-key "$api_key")
-          printf "  ${G}✓${N} Key valid. .env updated for Gemini 2.5 Flash.\n"
-          break
-        else
-          printf "  ${R}Invalid key.${N}\n"
-        fi
-      elif [ "$choice" = "$num_opus" ]; then
-        read -r -s -p "Enter Anthropic API key: " api_key
-        echo ""
-        api_key="$(printf '%s' "$api_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-        if [ -z "$api_key" ]; then
-          printf "${D}Skipped.${N}\n"
-          break
-        fi
-        printf "${D}Verifying...${N}\n"
-        if verify_anthropic_key "$api_key"; then
-          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode claude --model "claude-3-opus-20240229" --api-key "$api_key")
-          printf "  ${G}✓${N} Key valid. .env updated for Opus (Claude).\n"
-          break
-        else
-          printf "  ${R}Invalid key.${N}\n"
-        fi
-      elif [ "$choice" = "$num_openai" ]; then
-        read -r -s -p "Enter OpenAI API key: " api_key
-        echo ""
-        api_key="$(printf '%s' "$api_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-        if [ -z "$api_key" ]; then
-          printf "${D}Skipped.${N}\n"
-          break
-        fi
-        printf "${D}Verifying...${N}\n"
-        if verify_openai_key "$api_key"; then
-          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode openai --model "gpt-4o-mini" --api-key "$api_key")
-          printf "  ${G}✓${N} Key valid. .env updated for OpenAI.\n"
-          break
-        else
-          printf "  ${R}Invalid key.${N}\n"
-        fi
-      elif [ "$choice" = "$num_other" ]; then
-        read -r -p "Enter model name (e.g. ollama model or provider:model): " other_model
-        other_model="$(printf '%s' "$other_model" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-        if [ -z "$other_model" ]; then
-          printf "${D}Skipped.${N}\n"
-          break
-        fi
-        (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode ollama --model "$other_model")
-        printf "  ${G}✓${N} Set .env: custom model %s (Ollama).\n" "$other_model"
-        break
+do_config_llm_flow() {
+  if [ "$DRAFT_CONFIG_LLM" = "Y" ]; then
+    config_llm=y
+  else
+    read -r -p "Configure LLM for AI assistant? This will need an API key or local model. (y/N): " config_llm
+    config_llm="${config_llm:-n}"
+  fi
+  case "$config_llm" in
+    [yY]|[yY][eE][sS])
+      echo ""
+      env_file="$SCRIPT_DIR/.env"
+      llm_start=10
+      OLLAMA_NAMES=()
+      if command -v ollama >/dev/null 2>&1; then
+        while IFS= read -r name; do
+          [ -n "$name" ] && OLLAMA_NAMES+=("$name")
+        done < <(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+        idx=1
+        for name in "${OLLAMA_NAMES[@]}"; do
+          printf "  ${G}%d.${N} %s (Ollama)\n" "$idx" "$name"
+          idx=$((idx + 1))
+        done
+        llm_start=$idx
       else
-        printf "  ${R}Enter a number 1-%s.${N}\n" "$max_choice"
+        printf "${D}(Ollama not installed — local models skipped)${N}\n"
       fi
-    done
-    echo ""
-    ;;
-  *) echo "Received non-y/n response. Skipping LLM configuration.";;
-esac
+      first_ollama=1
+      last_ollama=$((llm_start - 1))
+      printf "  ${G}%d.${N} Gemini 2.5 Flash (cloud)\n" "$llm_start"
+      num_gemini=$llm_start
+      num_opus=$((llm_start + 1))
+      num_openai=$((llm_start + 2))
+      num_other=$((llm_start + 3))
+      printf "  ${G}%d.${N} Opus / Claude (cloud)\n" "$num_opus"
+      printf "  ${G}%d.${N} OpenAI low (cloud)\n" "$num_openai"
+      printf "  ${G}%d.${N} Other (enter model string)\n" "$num_other"
+      echo ""
+      max_choice=$num_other
+      while true; do
+        read -r -p "Choose model (1-${max_choice}): " choice
+        choice="$(printf '%s' "$choice" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        if [ -z "$choice" ]; then
+          printf "${D}Skipped.${N}\n"
+          break
+        fi
+        if [ "$choice" -ge "$first_ollama" ] 2>/dev/null && [ "$choice" -le "$last_ollama" ] 2>/dev/null; then
+          i=$((choice - 1))
+          model_name="${OLLAMA_NAMES[i]:-}"
+          if [ -n "$model_name" ]; then
+            (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode ollama --model "$model_name")
+            printf "  ${G}✓${N} Set .env: Ollama model %s\n" "$model_name"
+            break
+          fi
+          printf "  ${R}No model at that index.${N}\n"
+        elif [ "$choice" = "$num_gemini" ]; then
+          read -r -s -p "Enter Gemini API key: " api_key
+          echo ""
+          api_key="$(printf '%s' "$api_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -z "$api_key" ]; then printf "${D}Skipped.${N}\n"; break; fi
+          printf "${D}Verifying...${N}\n"
+          if verify_gemini_key "$api_key"; then
+            (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode gemini --model "gemini-2.5-flash" --api-key "$api_key")
+            printf "  ${G}✓${N} Key valid. .env updated for Gemini 2.5 Flash.\n"
+            break
+          else
+            printf "  ${R}Invalid key.${N}\n"
+          fi
+        elif [ "$choice" = "$num_opus" ]; then
+          read -r -s -p "Enter Anthropic API key: " api_key
+          echo ""
+          api_key="$(printf '%s' "$api_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -z "$api_key" ]; then printf "${D}Skipped.${N}\n"; break; fi
+          printf "${D}Verifying...${N}\n"
+          if verify_anthropic_key "$api_key"; then
+            (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode claude --model "claude-3-opus-20240229" --api-key "$api_key")
+            printf "  ${G}✓${N} Key valid. .env updated for Opus (Claude).\n"
+            break
+          else
+            printf "  ${R}Invalid key.${N}\n"
+          fi
+        elif [ "$choice" = "$num_openai" ]; then
+          read -r -s -p "Enter OpenAI API key: " api_key
+          echo ""
+          api_key="$(printf '%s' "$api_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -z "$api_key" ]; then printf "${D}Skipped.${N}\n"; break; fi
+          printf "${D}Verifying...${N}\n"
+          if verify_openai_key "$api_key"; then
+            (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode openai --model "gpt-4o-mini" --api-key "$api_key")
+            printf "  ${G}✓${N} Key valid. .env updated for OpenAI.\n"
+            break
+          else
+            printf "  ${R}Invalid key.${N}\n"
+          fi
+        elif [ "$choice" = "$num_other" ]; then
+          read -r -p "Enter model name (e.g. ollama model or provider:model): " other_model
+          other_model="$(printf '%s' "$other_model" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -z "$other_model" ]; then printf "${D}Skipped.${N}\n"; break; fi
+          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode ollama --model "$other_model")
+          printf "  ${G}✓${N} Set .env: custom model %s (Ollama).\n" "$other_model"
+          break
+        else
+          printf "  ${R}Enter a number 1-%s.${N}\n" "$max_choice"
+        fi
+      done
+      echo ""
+      ;;
+    *)
+      echo "Skipping LLM configuration."
+      ;;
+  esac
+}
 
-printf "${G}✓ .venv ready.${N}\n"
-bash "$SCRIPT_DIR/scripts/install_venv_banner.sh" 2>/dev/null || true
-printf "${D}Activate with: source .venv/bin/activate${N}\n"
-echo ""
-
-# Build RAG/vector index if a valid LLM is configured; ask user first
-if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/check_llm_ready.py 2>/dev/null); then
-  while true; do
-    read -r -p "RAG/index is required to use the AI feature, do you want to build it now? You can always build it in the UI later. (y/N): " build_rag
-    build_rag="$(printf '%s' "${build_rag:-n}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    case "$build_rag" in
-      y|yes) build_rag=1; break ;;
-      n|no)  build_rag=0; break ;;
-      *)     printf "  ${D}Please answer y or n.${N}\n" ;;
-    esac
-  done
-  if [ "$build_rag" = "1" ]; then
+do_build_rag_flow() {
+  if ! (cd "$SCRIPT_DIR" && "$PYTHON" scripts/check_llm_ready.py 2>/dev/null); then
+    printf "${D}LLM not configured; skip RAG build. Configure LLM first.${N}\n"
+    return
+  fi
+  if [ "$DRAFT_BUILD_RAG" = "Y" ]; then
+    build_rag=1
     rag_profile="quick"
+  else
     while true; do
-      read -r -p "Choose RAG/index rebuild mode: quick (faster, lighter model) or deep (nomic, slower). [quick/deep]: " rag_profile
-      rag_profile="$(printf '%s' "$rag_profile" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-      case "$rag_profile" in
-        quick|q|"") rag_profile="quick"; break ;;
-        deep|d)      rag_profile="deep"; break ;;
-        *)           printf "  ${D}Please answer quick or deep.${N}\n" ;;
+      read -r -p "Build RAG/index now? You can also do this later from the UI. (y/N): " build_rag
+      build_rag="$(printf '%s' "${build_rag:-n}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      case "$build_rag" in
+        y|yes) build_rag=1; break ;;
+        n|no)  build_rag=0; break ;;
+        *)     printf "  ${D}Please answer y or n.${N}\n" ;;
       esac
     done
+    if [ "$build_rag" = "1" ]; then
+      rag_profile="quick"
+      while true; do
+        read -r -p "Choose RAG/index rebuild mode: quick (faster, lighter model) or deep (nomic, slower). [quick/deep]: " rag_profile
+        rag_profile="$(printf '%s' "$rag_profile" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        case "$rag_profile" in
+          quick|q|"") rag_profile="quick"; break ;;
+          deep|d)      rag_profile="deep"; break ;;
+          *)           printf "  ${D}Please answer quick or deep.${N}\n" ;;
+        esac
+      done
+    fi
+  fi
+  if [ "$build_rag" = "1" ]; then
     printf "${D}Build RAG/vector index ...${N}\n"
-    # Ensure numpy<2 (and other deps) so index build doesn't fail with NumPy 2.x incompatibility
-    "$SCRIPT_DIR/.venv/bin/pip" install --progress-bar on -r "$SCRIPT_DIR/requirements.txt" 2>/dev/null || true
+    "$SCRIPT_DIR/.venv/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt" 2>/dev/null || true
     if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/index_for_ai.py --profile "$rag_profile" -v); then
       printf "${G}done.${N}\n"
     else
       printf "${R}failed (Ask index not built).${N}\n" >&2
     fi
   fi
-fi
+}
+
+do_start_ui_flow() {
+  if [ "$DRAFT_START_UI" = "Y" ]; then
+    start_ui=y
+  else
+    read -r -p "Start the Draft UI? (Y/n): " start_ui
+    start_ui="${start_ui:-y}"
+  fi
+  case "$start_ui" in
+    [yY]|[yY][eE][sS])
+      _UI_LOG="${DRAFT_HOME}/.draft-ui.log"
+      nohup "$PYTHON" "$SCRIPT_DIR/scripts/serve.py" >> "$_UI_LOG" 2>&1 &
+      _UI_PID=$!
+      ( sleep 2; case "$OS" in Darwin) open "http://localhost:8058" ;; *) xdg-open "http://localhost:8058" 2>/dev/null || true ;; esac ) &
+      printf "  ${G}Draft UI started in background${N} (PID %s). Log: %s\n" "$_UI_PID" "$_UI_LOG"
+      printf "  ${D}Stop with: kill %s${N}\n" "$_UI_PID"
+      ;;
+    *)
+      printf "${D}Skipped.${N}\n"
+      printf "You can start Draft later by running this setup.sh again or by running:\n"
+      printf "  source .venv/bin/activate\n"
+      printf "  python scripts/serve.py\n"
+      echo ""
+      ;;
+  esac
+}
+
+# --- Main flow: menu (single entrance for new and existing installs) ---
+printf "${D}--- Environment check ---${N}\n"
+printf "  %b\n" "$(check_venv && echo "${G}✓${N} .venv exists" || echo "${R}✗${N} .venv missing")"
 echo ""
-read -r -p "Start the Draft UI? (Y/n): " start_ui
-start_ui="${start_ui:-y}"
-case "$start_ui" in
-  [yY]|[yY][eE][sS])
-    _UI_LOG="${SCRIPT_DIR}/.draft-ui.log"
-    nohup "$PYTHON" "$SCRIPT_DIR/scripts/serve.py" >> "$_UI_LOG" 2>&1 &
-    _UI_PID=$!
-    ( sleep 2; case "$OS" in Darwin) open "http://localhost:8058" ;; *) xdg-open "http://localhost:8058" 2>/dev/null || true ;; esac ) &
-    printf "  ${G}Draft UI started in background${N} (PID %s). Log: %s\n" "$_UI_PID" "$_UI_LOG"
-    printf "  ${D}Stop with: kill %s${N}\n" "$_UI_PID"
-    ;;
-  *)
-    printf "${D}Skipped.${N}\n"
-    printf "You can start Draft later by running this setup.sh again or by running:\n"
-    printf "  source .venv/bin/activate\n"
-    printf "  python scripts/serve.py\n"
-    echo ""
-esac
+
+while true; do
+  show_current_state
+  printf "${D}Consistency check:${N}\n"
+  check_sources_consistency
+  echo ""
+  printf "What should the setup do next?\n"
+  printf "  1) Add doc sources\n"
+  printf "  2) Reconfigure LLM\n"
+  printf "  3) Rebuild RAG/index\n"
+  printf "  4) Start the Draft UI\n"
+  printf "  5) Done\n"
+  read -r -p "Choice (1-5) [4]: " menu_choice
+  menu_choice="${menu_choice:-4}"
+  case "$menu_choice" in
+    1) DRAFT_ADD_SOURCES=Y do_add_sources_flow ;;
+    2) DRAFT_CONFIG_LLM=Y do_config_llm_flow ;;
+    3) DRAFT_BUILD_RAG=Y do_build_rag_flow ;;
+    4) DRAFT_START_UI=Y do_start_ui_flow; exit 0 ;;
+    5) printf "${D}Done.${N}\n"; exit 0 ;;
+    *) printf "${D}Invalid.${N}\n" ;;
+  esac
+  echo ""
+done
