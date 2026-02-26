@@ -1,11 +1,26 @@
 """
+The main library for the RAG feature.
 RAG over draft docs: semantic search + LLM (Claude or Ollama).
 Strict "answer only from context" prompting. Returns streamed text + citations.
+
+What makes our RAG system?
+1. Our vector store (ChromaDB for this MVP)
+2. A strict context-only prompt to the LLM, see SYSTEM_PROMPT in prompts.py
+3. A way to retrieve the chunks from the vector store, see retrieve() in this file
+4. A way to stream the response from the LLM, see ask_stream() in this file
+
+There are limitations to this MVP RAG system:
+1. Not able to rebuild dynamically based on new files. #TODO
+2. Scalability is limited by the LLM and the vector store. #TODO
+3. too many to mention...
 """
 import os
 from pathlib import Path
 
 from lib.ingest import VECTOR_DIR, COLLECTION_NAME, EMBED_MODEL, TRUST_REMOTE_CODE  # noqa: F401
+from lib.manifest import parse_sources_yaml
+from lib.paths import get_effective_repo_root, get_sources_yaml_path, get_vault_root
+from lib.prompts import SYSTEM_PROMPT
 
 _EMBED_MODEL_CACHE: dict[tuple[str, bool], object] = {}
 
@@ -54,10 +69,8 @@ def llm_ready(draft_root: Path) -> bool:
     return False
 
 
+# The default top_k for the semantic search, revisit this later for a dynamic setting
 TOP_K = 5
-
-SYSTEM_PROMPT = """You are a direct, precise assistant. Answer only using the provided context from the user's private documentation. If the answer is not in the context, say you don't know. Do not guess or use external knowledge. Be concise and cite which doc/section when relevant."""
-
 
 def _coerce_bool(v, default: bool) -> bool:
     if isinstance(v, bool):
@@ -142,12 +155,20 @@ def retrieve(draft_root: Path, query: str, top_k: int = TOP_K) -> list[dict]:
     meta_list = metadatas[0] if metadatas else []
     docs_list = documents[0] if documents else []
     for i, m in enumerate(meta_list):
-        out.append({
+        item = {
             "repo": m.get("repo", ""),
             "path": m.get("path", ""),
             "heading": m.get("heading") or "",
             "text": docs_list[i] if i < len(docs_list) else (m.get("text") or ""),
-        })
+        }
+        sl, el = m.get("start_line"), m.get("end_line")
+        if sl is not None and el is not None:
+            try:
+                item["start_line"] = int(sl)
+                item["end_line"] = int(el)
+            except (TypeError, ValueError):
+                pass
+        out.append(item)
     return out
 
 
@@ -159,13 +180,54 @@ def _build_context(chunks: list[dict]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def _build_citations(draft_root: Path, chunks: list[dict]) -> list[dict]:
+    """Build citation dicts with optional start_line, end_line, snippet for code chunks."""
+    repos_config: dict = {}
+    sources_yaml = get_sources_yaml_path()
+    if sources_yaml.is_file():
+        repos_config = parse_sources_yaml(sources_yaml)
+
+    citations = []
+    for c in chunks:
+        cit: dict = {
+            "repo": c.get("repo", ""),
+            "path": c.get("path", ""),
+            "heading": c.get("heading") or "",
+        }
+        start_line = c.get("start_line")
+        end_line = c.get("end_line")
+        if start_line is not None and end_line is not None and isinstance(start_line, int) and isinstance(end_line, int):
+            repo_name = cit["repo"]
+            path_str = cit["path"]
+            if repo_name == "vault":
+                root = get_vault_root()
+            else:
+                source = (repos_config.get(repo_name) or {}).get("source") or ""
+                root = get_effective_repo_root(repo_name, source, draft_root)
+            full = root / path_str
+            snippet = ""
+            if full.is_file():
+                try:
+                    lines = full.read_text(encoding="utf-8", errors="replace").splitlines()
+                    start = max(1, min(start_line, len(lines)))
+                    end = min(max(start, end_line), len(lines))
+                    snippet = "\n".join(lines[start - 1 : end])
+                except OSError:
+                    pass
+            cit["start_line"] = start_line
+            cit["end_line"] = end_line
+            cit["snippet"] = snippet
+        citations.append(cit)
+    return citations
+
+
 def ask_stream(draft_root: Path, query: str):
     """
     Retrieve top-k chunks, call LLM with strict context-only prompt, stream response.
     Yields: ("text", str) for each delta, ("citations", list), ("error", str).
     """
     chunks = retrieve(draft_root, query, top_k=TOP_K)
-    citations = [{"repo": c["repo"], "path": c["path"], "heading": c.get("heading") or ""} for c in chunks]
+    citations = _build_citations(draft_root, chunks)
 
     if not chunks:
         yield ("error", "No indexed documents. Run 'python scripts/index_for_ai.py' to build the AI index.")
@@ -182,7 +244,8 @@ def ask_stream(draft_root: Path, query: str):
     if local_model and local_model.startswith("ollama_chat/"):
         local_model = local_model.replace("ollama_chat/", "", 1)
 
-    # MarginCall-style: CLOUD_AI_MODEL set → cloud (Gemini); LOCAL_AI_MODEL or OLLAMA_MODEL → local
+    # The following borrows from project MarginCall to set the LLM provider and model
+    # CLOUD_AI_MODEL set → cloud (Gemini); LOCAL_AI_MODEL or OLLAMA_MODEL → local
     if not provider and cloud_model:
         provider = "gemini"
     if not provider and (local_model or _env_strip("OLLAMA_MODEL")):

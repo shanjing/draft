@@ -17,15 +17,10 @@ _DRAFT_ROOT = _SCRIPT_DIR.parent
 if str(_DRAFT_ROOT) not in sys.path:
     sys.path.insert(0, str(_DRAFT_ROOT))
 
-import base64
-import json
 import os
 import re
 import shutil
 import subprocess
-import urllib.error
-import urllib.parse
-import urllib.request
 
 import click
 
@@ -48,11 +43,11 @@ VAULT_DIR = "vault"
 
 # Doc sources and vault live under DRAFT_HOME (~/.draft)
 try:
-    from lib.paths import get_doc_sources_root
+    from lib.paths import get_clones_root
     from lib.manifest import parse_sources_yaml
 except ImportError:
-    def get_doc_sources_root() -> Path:
-        return Path.home() / ".draft" / DOC_SOURCES_DIR
+    def get_clones_root() -> Path:
+        return Path.home() / ".draft" / ".clones"
 
 
 def get_git_remote_url(repo_path: Path) -> str | None:
@@ -153,67 +148,56 @@ def _parse_github_url(url: str) -> tuple[str, str] | None:
     return None
 
 
-def _github_api_request(path: str, method: str = "GET") -> dict | list:
-    """GET (or method) GitHub API path; path should start with /. Uses GITHUB_TOKEN if set."""
-    import os
-    url = f"https://api.github.com{path}"
-    req = urllib.request.Request(url, method=method)
-    req.add_header("Accept", "application/vnd.github.v3+json")
-    token = os.environ.get("GITHUB_TOKEN", "").strip()
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
+def _require_git() -> None:
+    """Ensure git is available; raise ClickException if not."""
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read().decode())
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-        raise click.ClickException(f"GitHub API error: {e}") from e
+        out = subprocess.run(
+            ["git", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if out.returncode != 0:
+            raise click.ClickException("Git is required for GitHub sources. Install git (https://git-scm.com) and try again.")
+    except FileNotFoundError:
+        raise click.ClickException("Git is required for GitHub sources. Install git (https://git-scm.com) and try again.")
 
 
-def _fetch_md_from_github(owner: str, repo: str, verbose: bool) -> list[tuple[str, bytes]]:
-    """Fetch all included .md file (path, content) from GitHub repo. Uses same exclusions as local."""
-    repo_info = _github_api_request(f"/repos/{owner}/{repo}")
-    default_branch = repo_info.get("default_branch") or "main"
+def _ensure_clone(git_url: str, clone_dir: Path) -> None:
+    """Clone repo into clone_dir if it does not already exist. git_url can be https or git@."""
+    if (clone_dir / ".git").is_dir():
+        return
+    clone_dir.parent.mkdir(parents=True, exist_ok=True)
     try:
-        branch_info = _github_api_request(f"/repos/{owner}/{repo}/branches/{default_branch}")
-    except click.ClickException:
-        try:
-            default_branch = "master"
-            branch_info = _github_api_request(f"/repos/{owner}/{repo}/branches/{default_branch}")
-        except click.ClickException:
-            raise click.ClickException(f"Could not get branch for {owner}/{repo}")
-    tree_sha = branch_info.get("commit", {}).get("commit", {}).get("tree", {}).get("sha")
-    if not tree_sha:
-        tree_sha = branch_info.get("commit", {}).get("tree", {}).get("sha")
-    if not tree_sha:
-        raise click.ClickException(f"Could not get tree SHA for {owner}/{repo}")
-    tree = _github_api_request(f"/repos/{owner}/{repo}/git/trees/{tree_sha}?recursive=1")
-    if not isinstance(tree, dict) or "tree" not in tree:
-        raise click.ClickException(f"Invalid tree response for {owner}/{repo}")
-    md_paths = []
-    for entry in tree["tree"]:
-        if entry.get("type") != "blob":
-            continue
-        path = entry.get("path", "")
-        if not path.endswith(".md"):
-            continue
-        if not should_include(path):
-            continue
-        md_paths.append(path)
-    result: list[tuple[str, bytes]] = []
-    for path in sorted(md_paths):
-        try:
-            content = _github_api_request(f"/repos/{owner}/{repo}/contents/{urllib.parse.quote(path)}?ref={default_branch}")
-            if isinstance(content, dict) and "content" in content:
-                raw = content["content"]
-                if content.get("encoding") == "base64":
-                    result.append((path, base64.b64decode(raw)))
-                else:
-                    result.append((path, raw.encode("utf-8")))
-                if verbose:
-                    click.echo(f"  {path}")
-        except click.ClickException:
-            continue
-    return result
+        subprocess.run(
+            ["git", "clone", "--", git_url, str(clone_dir)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.CalledProcessError as e:
+        err = (e.stderr or e.stdout or "").strip()
+        raise click.ClickException(f"git clone failed: {err}") from e
+    except subprocess.TimeoutExpired:
+        raise click.ClickException("git clone timed out") from None
+
+
+def _git_pull(clone_dir: Path) -> None:
+    """Run git pull in clone_dir."""
+    try:
+        subprocess.run(
+            ["git", "-C", str(clone_dir), "pull"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.CalledProcessError as e:
+        err = (e.stderr or e.stdout or "").strip()
+        raise click.ClickException(f"git pull failed: {err}") from e
+    except subprocess.TimeoutExpired:
+        raise click.ClickException("git pull timed out") from None
 
 
 def _paths_to_tree(paths: list[str]) -> dict:
@@ -377,100 +361,50 @@ def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
         return
 
     click.echo("Pull started.")
-    doc_sources_root = get_doc_sources_root()
-    doc_sources_root.mkdir(parents=True, exist_ok=True)
     for name, repo in repos.items():
         if name == VAULT_DIR:
-            continue  # Vault lives outside .doc_sources (e.g. ./vault); can later be S3/iCloud
+            continue  # Vault is not pulled from git
         source_path = repo["source"].strip()
 
-        # --- Remote GitHub: fetch .md via API, write to draft/name/ ---
+        # --- Remote GitHub: clone/pull via git (no copy; index and UI read from .clones) ---
         if _is_github_url(source_path):
             parsed = _parse_github_url(source_path)
             if not parsed:
                 click.echo(f"Skip {name}: invalid GitHub URL", err=True)
                 continue
-            owner, repo_name = parsed
-            if not quiet:
-                click.echo(f"[GitHub] Fetching {owner}/{repo_name} via API")
-            if verbose and not quiet:
-                click.echo(f"{name}")
+            _require_git()
+            clone_dir = get_clones_root() / name
             try:
-                files = _fetch_md_from_github(owner, repo_name, verbose and not quiet)
+                _ensure_clone(source_path, clone_dir)
+                if not quiet:
+                    click.echo(f"[GitHub] {name} from {clone_dir}")
+                _git_pull(clone_dir)
             except click.ClickException as e:
                 click.echo(f"Skip {name}: {e}", err=True)
                 continue
-            if verbose and not quiet and files:
-                tree = _paths_to_tree([p for p, _ in files])
-                _print_tree(tree)
-                click.echo()
-            updated = 0
-            for rel_str, content in files:
-                dest = doc_sources_root / name / rel_str
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(content)
-                if not quiet:
-                    click.echo(f"  [API] {rel_str}")
-                updated += 1
-            if updated > 0:
-                click.echo(f"[Done] {name}: {updated} file(s) updated")
-            else:
-                click.echo(f"[Done] {name}: up to date")
+            if not quiet:
+                click.echo(f"[Done] {name}: up to date (index/UI read from clone)")
             continue
 
-        # --- Local path ---
+        # --- Local path: no copy; index and UI read from source path ---
         if not Path(source_path).is_absolute():
             source_root = (draft_root / source_path).resolve()
         else:
             source_root = Path(source_path)
 
-        if not source_root.is_dir():
+        if not source_root.is_dir() and not source_root.is_file():
             click.echo(f"Skip {name}: source not found: {source_root}", err=True)
             continue
 
-        # If git repo and url missing in yaml, fetch and write
         if not repo.get("url"):
             git_url = get_git_remote_url(source_root)
             if git_url:
                 _ensure_repo_url_in_yaml(sources_yaml, name, git_url)
                 repo["url"] = git_url
 
-        # Collect included paths (for verbose tree and for copy)
-        paths: list[str] = []
-        for f in source_root.rglob("*.md"):
-            try:
-                rel = f.relative_to(source_root)
-            except ValueError:
-                continue
-            rel_str = rel.as_posix()
-            if not should_include(rel_str):
-                continue
-            paths.append(rel_str)
-
-        if verbose and not quiet:
-            click.echo(f"{name}")
-            if paths:
-                tree = _paths_to_tree(paths)
-                _print_tree(tree)
-            click.echo()
-
         if not quiet:
-            click.echo(f"[Local] {name} from {source_root}")
-        updated = 0
-        for rel_str in paths:
-            f = source_root / rel_str
-            dest = doc_sources_root / name / rel_str
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if not dest.exists() or f.stat().st_mtime > dest.stat().st_mtime:
-                shutil.copy2(f, dest)
-                if not quiet:
-                    click.echo(f"  [Copy] {rel_str}")
-                updated += 1
-
-        if updated > 0:
-                click.echo(f"[Done] {name}: {updated} file(s) updated")
-        else:
-                click.echo(f"[Done] {name}: up to date")
+            click.echo(f"[Local] {name} from {source_root} (no copy; index/UI read from source)")
+            click.echo(f"[Done] {name}: up to date")
 
     try:
         from lib.manifest import update_manifest
@@ -482,14 +416,14 @@ def do_pull(draft_root: Path, verbose: bool, quiet: bool = False) -> None:
 
 def do_add_repo(draft_root: Path, add_arg: str, verbose: bool, quiet: bool = False) -> None:
     """Add a repo to sources.yaml (in DRAFT_HOME) and run pull (including the new repo).
-    add_arg can be: local path, repo name (../name), or GitHub URL (no clone).
+    add_arg can be: local path, repo name (../name), or GitHub URL (clone/pull via git).
     """
     from lib.paths import ensure_sources_yaml
     sources_yaml = ensure_sources_yaml(draft_root)
     existing = parse_sources_yaml(sources_yaml)
     add_arg = add_arg.strip()
 
-    # GitHub URL: add source as URL (no local clone); pull will fetch .md via API
+    # GitHub URL: add source as URL; pull will clone/pull via git and sync .md
     if _is_github_url(add_arg):
         parsed = _parse_github_url(add_arg)
         if not parsed:
@@ -498,10 +432,9 @@ def do_add_repo(draft_root: Path, add_arg: str, verbose: bool, quiet: bool = Fal
         name = f"{owner}_{repo_name}"
         if name in existing:
             raise click.ClickException(f"Repo '{name}' is already in sources.yaml")
-        # Normalize to https URL for API
         source_path = f"https://github.com/{owner}/{repo_name}"
         _add_repo_to_yaml(sources_yaml, name, source_path, url=source_path)
-        click.echo(f"Added {name} -> {source_path} (pull fetches .md from GitHub)")
+        click.echo(f"Added {name} -> {source_path} (pull uses git clone/pull)")
         click.echo()
         do_pull(draft_root, verbose, quiet=quiet)
         _run_index_for_ai_if_ready(draft_root, quiet)
@@ -518,8 +451,8 @@ def do_add_repo(draft_root: Path, add_arg: str, verbose: bool, quiet: bool = Fal
         source_path = f"../{name}"
         resolved = (draft_root / source_path).resolve()
 
-    if not resolved.is_dir():
-        raise click.ClickException(f"Not a directory (cannot add): {resolved}")
+    if not resolved.is_dir() and not resolved.is_file():
+        raise click.ClickException(f"Not a directory or file (cannot add): {resolved}")
 
     if name in existing:
         raise click.ClickException(f"Repo '{name}' is already in sources.yaml")

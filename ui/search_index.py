@@ -1,7 +1,7 @@
 """
 Full-text search index over draft .md files using Whoosh.
 Index is stored under DRAFT_ROOT/.search_index/.
-Doc sources and vault are read from DRAFT_HOME (~/.draft).
+Vault and repo effective roots (from sources.yaml) are indexed; no copy.
 """
 import re
 from pathlib import Path
@@ -10,7 +10,10 @@ from whoosh.fields import ID, TEXT, Schema
 from whoosh.index import create_in, open_dir, exists_in
 from whoosh.qparser import QueryParser
 
-from lib.paths import get_doc_sources_root, get_vault_root
+from lib.gitignore import get_git_ignored_set
+from lib.ingest import should_include
+from lib.manifest import parse_sources_yaml
+from lib.paths import get_effective_repo_root, get_sources_yaml_path, get_vault_root
 
 INDEX_DIR = ".search_index"
 CONTENT_FIELD = "content"
@@ -29,12 +32,20 @@ def get_schema() -> Schema:
 
 
 def _add_repo_to_writer(writer, repo_name: str, repo_dir: Path) -> int:
-    count = 0
+    candidates: list[tuple[str, Path]] = []
     for f in repo_dir.rglob("*.md"):
         try:
             rel = f.relative_to(repo_dir)
             path_str = rel.as_posix()
         except ValueError:
+            continue
+        if not should_include(path_str):
+            continue
+        candidates.append((path_str, f))
+    ignored = get_git_ignored_set(repo_dir, [p for p, _ in candidates])
+    count = 0
+    for path_str, f in candidates:
+        if path_str in ignored:
             continue
         try:
             content = f.read_text(encoding="utf-8", errors="replace")
@@ -46,7 +57,7 @@ def _add_repo_to_writer(writer, repo_name: str, repo_dir: Path) -> int:
 
 
 def build_index(draft_root: Path) -> int:
-    """Index .md under ~/.draft/vault and ~/.draft/.doc_sources/<repo>/. Returns document count."""
+    """Index .md under vault and each repo's effective root (sources.yaml). Returns document count."""
     idx_path = _index_path(draft_root)
     idx_path.mkdir(parents=True, exist_ok=True)
     schema = get_schema()
@@ -60,12 +71,25 @@ def build_index(draft_root: Path) -> int:
     vault_dir = get_vault_root()
     if vault_dir.is_dir():
         count += _add_repo_to_writer(writer, "vault", vault_dir)
-    sources_dir = get_doc_sources_root()
-    if sources_dir.is_dir():
-        for repo_dir in sorted(sources_dir.iterdir()):
-            if not repo_dir.is_dir() or repo_dir.name.startswith("."):
+    sources_yaml = get_sources_yaml_path()
+    if sources_yaml.is_file():
+        repos = parse_sources_yaml(sources_yaml)
+        for name, repo in sorted(repos.items()):
+            if name == "vault":
                 continue
-            count += _add_repo_to_writer(writer, repo_dir.name, repo_dir)
+            source = (repo.get("source") or "").strip()
+            if not source:
+                continue
+            repo_root = get_effective_repo_root(name, source, draft_root)
+            if repo_root.is_dir():
+                count += _add_repo_to_writer(writer, name, repo_root)
+            elif repo_root.is_file() and repo_root.suffix == ".md":
+                try:
+                    content = repo_root.read_text(encoding="utf-8", errors="replace")
+                    writer.add_document(repo=name, path=repo_root.name, content=content)
+                    count += 1
+                except OSError:
+                    pass
     writer.commit()
     return count
 
