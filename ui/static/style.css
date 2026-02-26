@@ -720,6 +720,158 @@ body[data-theme="bright"] .sidebar-resize:active {
 .doc th, .doc td { border: 1px solid var(--border); padding: 0.5rem 0.75rem; text-align: left; }
 .doc th { background: var(--bg-sidebar); }
 
+/* Code pad (CoderPad-style sub-window for .py files) */
+.doc-code-pad {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-sidebar);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+.doc-code-pad-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+.doc-code-pad-filename {
+  font-family: var(--font-mono);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-code-pad-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+.doc-code-pad-theme-label,
+.doc-code-pad-font-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--fg-dim);
+  font-size: 0.75rem;
+}
+.doc-code-pad-theme,
+.doc-code-pad-font-size,
+.doc-code-pad-font-family {
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.doc-code-pad-window {
+  max-height: 70vh;
+  overflow: auto;
+  padding: 0;
+}
+.doc-code-pad pre {
+  margin: 0;
+  padding: 1rem;
+  border-radius: 0;
+  background: transparent !important;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.doc-code-pad pre code {
+  background: none !important;
+  padding: 0;
+}
+
+/* Code pad font size */
+.doc-code-pad[data-code-font-size="small"] .doc-code-pad-window pre { font-size: 12px; }
+.doc-code-pad[data-code-font-size="medium"] .doc-code-pad-window pre { font-size: 14px; }
+.doc-code-pad[data-code-font-size="large"] .doc-code-pad-window pre { font-size: 16px; }
+
+/* Code pad font family */
+.doc-code-pad[data-code-font-family="jetbrains"] .doc-code-pad-window pre { font-family: "JetBrains Mono", monospace; }
+.doc-code-pad[data-code-font-family="fira"] .doc-code-pad-window pre { font-family: "Fira Code", monospace; }
+.doc-code-pad[data-code-font-family="system"] .doc-code-pad-window pre { font-family: ui-monospace, "Cascadia Code", monospace; }
+
+/* Code pad themes: dark */
+.doc-code-pad[data-code-theme="dark-tomorrow"] .doc-code-pad-window { background: #1d1f21; }
+.doc-code-pad[data-code-theme="dark-tomorrow"] .token.comment { color: #969896; }
+.doc-code-pad[data-code-theme="dark-tomorrow"] .token.keyword { color: #b294bb; }
+.doc-code-pad[data-code-theme="dark-tomorrow"] .token.string { color: #b5bd68; }
+.doc-code-pad[data-code-theme="dark-tomorrow"] .token.function { color: #81a2be; }
+.doc-code-pad[data-code-theme="dark-tomorrow"] .token.number { color: #de935f; }
+.doc-code-pad[data-code-theme="dark-tomorrow"] .token.class-name { color: #f0c674; }
+.doc-code-pad[data-code-theme="dark-tomorrow"] .token.decorator { color: #cc6666; }
+.doc-code-pad[data-code-theme="dark-tomorrow"] .token.operator { color: #8abeb7; }
+.doc-code-pad[data-code-theme="dark-tomorrow"] .token.punctuation { color: #c5c8c6; }
+.doc-code-pad[data-code-theme="dark-tomorrow"] pre code { color: #c5c8c6; }
+
+.doc-code-pad[data-code-theme="dark-dracula"] .doc-code-pad-window { background: #282a36; }
+.doc-code-pad[data-code-theme="dark-dracula"] .token.comment { color: #6272a4; }
+.doc-code-pad[data-code-theme="dark-dracula"] .token.keyword { color: #ff79c6; }
+.doc-code-pad[data-code-theme="dark-dracula"] .token.string { color: #f1fa8c; }
+.doc-code-pad[data-code-theme="dark-dracula"] .token.function { color: #50fa7b; }
+.doc-code-pad[data-code-theme="dark-dracula"] .token.number { color: #bd93f9; }
+.doc-code-pad[data-code-theme="dark-dracula"] .token.class-name { color: #8be9fd; }
+.doc-code-pad[data-code-theme="dark-dracula"] .token.decorator { color: #ff79c6; }
+.doc-code-pad[data-code-theme="dark-dracula"] .token.operator { color: #ff79c6; }
+.doc-code-pad[data-code-theme="dark-dracula"] .token.punctuation { color: #f8f8f2; }
+.doc-code-pad[data-code-theme="dark-dracula"] pre code { color: #f8f8f2; }
+
+.doc-code-pad[data-code-theme="dark-nord"] .doc-code-pad-window { background: #2e3440; }
+.doc-code-pad[data-code-theme="dark-nord"] .token.comment { color: #616e88; }
+.doc-code-pad[data-code-theme="dark-nord"] .token.keyword { color: #81a1c1; }
+.doc-code-pad[data-code-theme="dark-nord"] .token.string { color: #a3be8c; }
+.doc-code-pad[data-code-theme="dark-nord"] .token.function { color: #88c0d0; }
+.doc-code-pad[data-code-theme="dark-nord"] .token.number { color: #b48ead; }
+.doc-code-pad[data-code-theme="dark-nord"] .token.class-name { color: #ebcb8b; }
+.doc-code-pad[data-code-theme="dark-nord"] .token.decorator { color: #bf616a; }
+.doc-code-pad[data-code-theme="dark-nord"] .token.operator { color: #81a1c1; }
+.doc-code-pad[data-code-theme="dark-nord"] .token.punctuation { color: #d8dee9; }
+.doc-code-pad[data-code-theme="dark-nord"] pre code { color: #d8dee9; }
+
+/* Code pad themes: light */
+.doc-code-pad[data-code-theme="light-gh"] .doc-code-pad-window { background: #f6f8fa; }
+.doc-code-pad[data-code-theme="light-gh"] .token.comment { color: #6e7781; }
+.doc-code-pad[data-code-theme="light-gh"] .token.keyword { color: #cf222e; }
+.doc-code-pad[data-code-theme="light-gh"] .token.string { color: #0a3069; }
+.doc-code-pad[data-code-theme="light-gh"] .token.function { color: #953800; }
+.doc-code-pad[data-code-theme="light-gh"] .token.number { color: #0550ae; }
+.doc-code-pad[data-code-theme="light-gh"] .token.class-name { color: #116329; }
+.doc-code-pad[data-code-theme="light-gh"] .token.decorator { color: #cf222e; }
+.doc-code-pad[data-code-theme="light-gh"] .token.operator { color: #0550ae; }
+.doc-code-pad[data-code-theme="light-gh"] .token.punctuation { color: #24292f; }
+.doc-code-pad[data-code-theme="light-gh"] pre code { color: #24292f; }
+
+.doc-code-pad[data-code-theme="light-coy"] .doc-code-pad-window { background: #f7f7f7; }
+.doc-code-pad[data-code-theme="light-coy"] .token.comment { color: #7d7d7d; }
+.doc-code-pad[data-code-theme="light-coy"] .token.keyword { color: #0080ff; }
+.doc-code-pad[data-code-theme="light-coy"] .token.string { color: #2e8b57; }
+.doc-code-pad[data-code-theme="light-coy"] .token.function { color: #2e8b57; }
+.doc-code-pad[data-code-theme="light-coy"] .token.number { color: #b07000; }
+.doc-code-pad[data-code-theme="light-coy"] .token.class-name { color: #2e8b57; }
+.doc-code-pad[data-code-theme="light-coy"] .token.decorator { color: #808080; }
+.doc-code-pad[data-code-theme="light-coy"] .token.operator { color: #0080ff; }
+.doc-code-pad[data-code-theme="light-coy"] .token.punctuation { color: #333; }
+.doc-code-pad[data-code-theme="light-coy"] pre code { color: #333; }
+
+.doc-code-pad[data-code-theme="light-default"] .doc-code-pad-window { background: #f5f5f5; }
+.doc-code-pad[data-code-theme="light-default"] .token.comment { color: #708090; }
+.doc-code-pad[data-code-theme="light-default"] .token.keyword { color: #007020; font-weight: bold; }
+.doc-code-pad[data-code-theme="light-default"] .token.string { color: #4070a0; }
+.doc-code-pad[data-code-theme="light-default"] .token.function { color: #06287e; }
+.doc-code-pad[data-code-theme="light-default"] .token.number { color: #40a070; }
+.doc-code-pad[data-code-theme="light-default"] .token.class-name { color: #0e84b5; }
+.doc-code-pad[data-code-theme="light-default"] .token.decorator { color: #007020; }
+.doc-code-pad[data-code-theme="light-default"] .token.operator { color: #666; }
+.doc-code-pad[data-code-theme="light-default"] .token.punctuation { color: #555; }
+.doc-code-pad[data-code-theme="light-default"] pre code { color: #333; }
+
 .error {
   color: #f87171;
   font-size: 0.9rem;
@@ -998,6 +1150,12 @@ body[data-theme="bright"] .sidebar-resize:active {
   font-size: 0.75rem;
   color: var(--fg-dim);
 }
+.ask-citation-item {
+  margin-bottom: 0.5rem;
+}
+.ask-citation-item:last-child {
+  margin-bottom: 0;
+}
 .ask-citations a {
   color: var(--accent);
   text-decoration: none;
@@ -1006,6 +1164,18 @@ body[data-theme="bright"] .sidebar-resize:active {
 }
 .ask-citations a:hover {
   text-decoration: underline;
+}
+.ask-citation-snippet {
+  margin: 0.25rem 0 0;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre;
 }
 .ask-error {
   margin-top: 0.5rem;

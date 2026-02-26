@@ -29,14 +29,15 @@ DRAFT_ROOT = Path(__file__).resolve().parent.parent
 DOC_SOURCES_DIR = ".doc_sources"
 VAULT_DIR = "vault"
 
-# Global allowed document types (tree + doc viewer). Capped at 5.
-ALLOWED_DOC_EXTENSIONS = (".md", ".txt", ".pdf", ".doc", ".docx")
+# Global allowed document types (tree + doc viewer). Includes code for citation links.
+ALLOWED_DOC_EXTENSIONS = (".md", ".txt", ".pdf", ".doc", ".docx", ".py")
 DOC_CONTENT_TYPES = {
     ".md": "text/markdown",
     ".txt": "text/plain",
     ".pdf": "application/pdf",
     ".doc": "application/msword",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".py": "text/plain",
 }
 if str(DRAFT_ROOT) not in sys.path:
     sys.path.insert(0, str(DRAFT_ROOT))
@@ -50,7 +51,9 @@ except ImportError:
 
 from lib.log import logger, configure as configure_log
 from lib.manifest import parse_sources_yaml
-from lib.paths import get_doc_sources_root, get_vault_root, ensure_vault_ready, ensure_sources_yaml, get_sources_yaml_path
+from lib.gitignore import get_git_ignored_set
+from lib.ingest import should_include
+from lib.paths import get_clones_root, get_doc_sources_root, get_effective_repo_root, get_vault_root, ensure_vault_ready, ensure_sources_yaml, get_sources_yaml_path
 
 configure_log()
 
@@ -154,52 +157,79 @@ def _paths_to_tree_node(paths: list[str], source_map: dict[str, str] | None = No
 
 
 def _doc_sources_root() -> Path:
-    """Root for repo dirs: ~/.draft/.doc_sources (or DRAFT_HOME)."""
+    """Legacy root for cleanup (remove_source); index/UI use effective roots."""
     return get_doc_sources_root()
 
 
+def _resolve_repo_dir(name: str, source: str) -> Path | None:
+    """Resolve repo directory: vault -> DRAFT_HOME/vault; others -> effective root (source path or .clones/name)."""
+    if name == VAULT_DIR:
+        ensure_vault_ready()
+        return get_vault_root()
+    return get_effective_repo_root(name, source, DRAFT_ROOT)
+
+
+def _get_repo_dir(repo_name: str) -> Path | None:
+    """Resolve repo directory by name (from sources.yaml). For use in api_doc, vault save, etc."""
+    sources_yaml = ensure_sources_yaml(DRAFT_ROOT)
+    if not sources_yaml.is_file():
+        return None
+    repos = parse_sources_yaml(sources_yaml)
+    if repo_name not in repos:
+        return None
+    return _resolve_repo_dir(repo_name, repos[repo_name].get("source", "") or "")
+
+
+def _repo_file_entry(name: str, file_path: Path, url: str | None = None) -> dict:
+    """Build one repo entry for a single-file source (local_file type)."""
+    return {
+        "name": name,
+        "url": url,
+        "tree": [{"name": file_path.name, "type": "file", "path": file_path.name}],
+    }
+
+
 def _repo_tree_entry(name: str, repo_dir: Path, url: str | None = None) -> dict:
-    """Build one repo entry: name, url, tree (children). Uses global ALLOWED_DOC_EXTENSIONS. For vault, file nodes get source from .draft_sources.json."""
-    paths = []
+    """Build one repo entry: name, url, tree (children). Excludes .venv, .pytest_cache, .git, paths in .gitignore; only ALLOWED_DOC_EXTENSIONS."""
+    paths: list[str] = []
     for f in repo_dir.rglob("*"):
         if f.is_file() and f.suffix.lower() in ALLOWED_DOC_EXTENSIONS:
-            # Exclude the vault sources manifest from the tree
             if name == VAULT_DIR and f.name == VAULT_SOURCES_FILENAME:
                 continue
             try:
                 rel = f.relative_to(repo_dir)
-                paths.append(rel.as_posix())
+                path_str = rel.as_posix()
             except ValueError:
                 continue
+            if not should_include(path_str):
+                continue
+            paths.append(path_str)
+    ignored = get_git_ignored_set(repo_dir, paths)
+    paths = [p for p in paths if p not in ignored]
     source_map = _read_vault_sources(repo_dir) if name == VAULT_DIR else None
     tree = _paths_to_tree_node(paths, source_map=source_map)
     return {"name": name, "url": url, "tree": tree["children"]}
 
 
-def _resolve_repo_dir(name: str, source: str) -> Path | None:
-    """Resolve repo directory from sources.yaml entry. Vault: DRAFT_HOME/vault; others: .doc_sources/name."""
-    if name == VAULT_DIR:
-        ensure_vault_ready()
-        return get_vault_root()
-    # Normal source: stored under .doc_sources/<name>/
-    return _doc_sources_root() / name
-
-
 def get_tree() -> list:
-    """Build tree from sources.yaml in DRAFT_HOME (source of truth). Vault first, then others in yaml order."""
+    """Build tree from sources.yaml in DRAFT_HOME (source of truth). Vault first, then others in yaml order.
+    Every repo in sources.yaml is included; if effective root does not exist yet (e.g. not pulled), show with empty tree so UI stays in sync with yaml."""
     sources_yaml = ensure_sources_yaml(DRAFT_ROOT)
     if not sources_yaml.is_file():
         return []
     repos = parse_sources_yaml(sources_yaml)
-    doc_sources = _doc_sources_root()
     result = []
     for name in repos:
-        repo_dir = _resolve_repo_dir(name, repos[name]["source"])
+        repo_dir = _resolve_repo_dir(name, repos[name].get("source", "") or "")
         if repo_dir is None:
             continue
-        if not repo_dir.is_dir():
-            continue
-        result.append(_repo_tree_entry(name, repo_dir, repos[name].get("url")))
+        if repo_dir.is_dir():
+            result.append(_repo_tree_entry(name, repo_dir, repos[name].get("url")))
+        elif repo_dir.is_file() and repo_dir.suffix.lower() in ALLOWED_DOC_EXTENSIONS:
+            result.append(_repo_file_entry(name, repo_dir, repos[name].get("url")))
+        else:
+            # Effective root missing (not pulled yet or invalid path); include repo with empty tree so UI matches sources.yaml
+            result.append({"name": name, "url": repos[name].get("url"), "tree": []})
     # Keep vault first if present
     vault_idx = next((i for i, r in enumerate(result) if r["name"] == VAULT_DIR), -1)
     if vault_idx > 0:
@@ -274,7 +304,10 @@ def api_ask(body: AskBody):
     query = (body.query or "").strip()
     if not query:
         return {"error": "Missing query."}
-
+    """
+    User asks a question in the UI triggers ai_engine.ask_stream()
+    This is also the main invocation point for RAG.
+    """
     def event_stream():
         try:
             engine = _ai_engine()
@@ -493,20 +526,37 @@ def api_remove_source(body: RemoveSourceBody):
             sources_yaml.write_text(backup_text, encoding="utf-8")
             return {"ok": False, "error": "sources.yaml invalid after remove: " + "; ".join(errors), "logs": logs}
 
+        # Remove clone dir for GitHub sources (no copy; index/UI read from .clones)
+        source = repos[name].get("source", "") or ""
+        if "github.com" in source:
+            clone_dir = get_clones_root() / name
+            if clone_dir.exists():
+                try:
+                    shutil.rmtree(clone_dir)
+                    logs.append(f"Removed clone: {clone_dir}")
+                except OSError as e:
+                    logs.append(f"Warning: could not remove clone dir: {e}")
+        # Clean up legacy .doc_sources copy if present
         doc_sources_root = _doc_sources_root().resolve()
         repo_dir = (doc_sources_root / name).resolve()
         if repo_dir.exists():
             try:
                 repo_dir.relative_to(doc_sources_root)
             except ValueError:
-                return {"ok": False, "error": "Unsafe source directory path.", "logs": logs}
-            if repo_dir.is_dir():
-                shutil.rmtree(repo_dir)
+                pass  # skip unsafe path
             else:
-                repo_dir.unlink()
-            logs.append(f"Removed folder: {repo_dir}")
-        else:
-            logs.append(f"Folder not found (already removed): {repo_dir}")
+                if repo_dir.is_dir():
+                    try:
+                        shutil.rmtree(repo_dir)
+                        logs.append(f"Removed legacy copy: {repo_dir}")
+                    except OSError:
+                        pass
+                else:
+                    try:
+                        repo_dir.unlink()
+                        logs.append(f"Removed: {repo_dir}")
+                    except OSError:
+                        pass
 
         # Clean vault source tags for removed source (metadata layer).
         try:
@@ -597,7 +647,9 @@ def api_vault_save_from_doc(body: VaultSaveFromDocBody):
         raise HTTPException(status_code=400, detail="Invalid path")
     if body.repo == VAULT_DIR:
         raise HTTPException(status_code=400, detail="Document is already in vault")
-    repo_root = _doc_sources_root() / body.repo
+    repo_root = _get_repo_dir(body.repo)
+    if repo_root is None or not repo_root.is_dir():
+        raise HTTPException(status_code=404, detail="Not found")
     full = (repo_root / body.path).resolve()
     try:
         full.relative_to(repo_root.resolve())
@@ -722,22 +774,24 @@ async def api_vault_upload(files: list[UploadFile] = File(default=[])):
 def api_doc(repo: str, path: str):
     if ".." in path or path.startswith("/"):
         raise HTTPException(status_code=400, detail="Invalid path")
-    if repo == VAULT_DIR:
-        repo_root = get_vault_root()
-    else:
-        repo_root = _doc_sources_root() / repo
-    full = repo_root / path
-    try:
-        full = full.resolve()
-        full.relative_to(repo_root.resolve())
-    except (ValueError, OSError):
+    repo_root = _get_repo_dir(repo)
+    if repo_root is None or (not repo_root.is_dir() and not repo_root.is_file()):
         raise HTTPException(status_code=404, detail="Not found")
+    if repo_root.is_file():
+        full = repo_root  # single-file source; path param is ignored
+    else:
+        full = repo_root / path
+        try:
+            full = full.resolve()
+            full.relative_to(repo_root.resolve())
+        except (ValueError, OSError):
+            raise HTTPException(status_code=404, detail="Not found")
     suffix = full.suffix.lower()
     if not full.is_file() or suffix not in ALLOWED_DOC_EXTENSIONS:
         raise HTTPException(status_code=404, detail="Not found")
     media_type = DOC_CONTENT_TYPES.get(suffix, "application/octet-stream")
     try:
-        if suffix in (".md", ".txt"):
+        if suffix in (".md", ".txt", ".py"):
             return PlainTextResponse(
                 full.read_text(encoding="utf-8", errors="replace"),
                 media_type=media_type,

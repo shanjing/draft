@@ -1,15 +1,14 @@
 """
 Generate draft_config.json from sources.yaml (single source of truth).
 The manifest is always derived; never hand-edited. Used for re-link and tooling.
-Vault and .doc_sources live under DRAFT_HOME (~/.draft); resolved_path reflects that.
+resolved_path: vault -> DRAFT_HOME/vault; GitHub -> .clones/name; local -> source path.
 """
 import json
 import re
 from pathlib import Path
 
-from lib.paths import get_doc_sources_root, get_sources_yaml_path, get_vault_root
+from lib.paths import get_clones_root, get_sources_yaml_path, get_vault_root, get_x_posts_root
 
-DOC_SOURCES_DIR = ".doc_sources"
 VAULT_DIR = "vault"
 MANIFEST_DIR = ".draft"
 MANIFEST_FILENAME = "draft_config.json"
@@ -50,7 +49,15 @@ def _source_type(name: str, source: str, url: str | None) -> str:
         return "vault"
     if source and "github.com" in source:
         return "github"
-    return "local"
+    if source and ("x.com/" in source or "twitter.com/" in source):
+        return "x_post"
+    # Local sources — distinguish by path type and url presence
+    src = source.strip() if source else ""
+    if src and Path(src).suffix == ".md":
+        return "local_file"
+    if url:
+        return "local_git"
+    return "local_dir"
 
 
 def _resolved_path(draft_root: Path, name: str, source: str, source_type: str) -> str | None:
@@ -58,9 +65,15 @@ def _resolved_path(draft_root: Path, name: str, source: str, source_type: str) -
         p = get_vault_root()
         return str(p) if p.exists() else None
     if source_type == "github":
-        p = get_doc_sources_root() / name
+        p = get_clones_root() / name
         return str(p) if p.exists() else None
-    # local
+    if source_type == "x_post":
+        p = get_x_posts_root() / name
+        return str(p) if p.exists() else None
+    if source_type == "local_file":
+        p = Path(source) if Path(source).is_absolute() else (draft_root / source).resolve()
+        return str(p) if p.exists() else None
+    # local_dir / local_git
     if not source:
         return None
     if Path(source).is_absolute():

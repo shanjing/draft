@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from lib.manifest import build_manifest, parse_sources_yaml
-from lib.paths import get_doc_sources_root, get_vault_root
+from lib.paths import get_clones_root, get_vault_root
 
 
 REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -66,7 +66,7 @@ def verify_sources_yaml(
                     warnings.append(f"'{name}': vault path not found (create {get_vault_root()})")
                 elif st == "github":
                     warnings.append(
-                        f"'{name}': not pulled yet (run Pull to create {get_doc_sources_root() / name})"
+                        f"'{name}': not pulled yet (run Pull to clone into {get_clones_root() / name})"
                     )
                 else:
                     src = entry.get("source", "")

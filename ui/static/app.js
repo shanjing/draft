@@ -76,6 +76,55 @@
     docEl.classList.remove('hidden');
   }
 
+  function showPythonCodePad(code, path, sourceType) {
+    placeholderEl.classList.add('hidden');
+    errorEl.classList.add('hidden');
+    var theme = getCodeTheme();
+    var fontSize = getCodeFontSize();
+    var fontFamily = getCodeFontFamily();
+    var filename = path.split('/').pop();
+    var darkOpts = CODE_THEMES.filter(function (t) { return t.dark; }).map(function (t) {
+      return '<option value="' + escapeAttr(t.value) + '"' + (t.value === theme ? ' selected' : '') + '>' + escapeHtml(t.label) + '</option>';
+    }).join('');
+    var lightOpts = CODE_THEMES.filter(function (t) { return !t.dark; }).map(function (t) {
+      return '<option value="' + escapeAttr(t.value) + '"' + (t.value === theme ? ' selected' : '') + '>' + escapeHtml(t.label) + '</option>';
+    }).join('');
+    var sizeOpts = CODE_FONT_SIZES.map(function (s) {
+      return '<option value="' + escapeAttr(s.value) + '"' + (s.value === fontSize ? ' selected' : '') + '>' + escapeHtml(s.label) + '</option>';
+    }).join('');
+    var familyOpts = CODE_FONT_FAMILIES.map(function (f) {
+      return '<option value="' + escapeAttr(f.value) + '"' + (f.value === fontFamily ? ' selected' : '') + '>' + escapeHtml(f.label) + '</option>';
+    }).join('');
+    var html = '<div class="doc-code-pad" data-code-theme="' + escapeAttr(theme) + '" data-code-font-size="' + escapeAttr(fontSize) + '" data-code-font-family="' + escapeAttr(fontFamily) + '">' +
+      '<div class="doc-code-pad-toolbar">' +
+        '<span class="doc-code-pad-filename" title="' + escapeAttr(path) + '">' + escapeHtml(filename) + '</span>' +
+        '<div class="doc-code-pad-controls">' +
+          '<label class="doc-code-pad-theme-label">Theme <select class="doc-code-pad-theme" aria-label="Code theme">' +
+            '<optgroup label="Dark">' + darkOpts + '</optgroup>' +
+            '<optgroup label="Light">' + lightOpts + '</optgroup>' +
+          '</select></label>' +
+          '<label class="doc-code-pad-font-label">Size <select class="doc-code-pad-font-size" aria-label="Font size">' + sizeOpts + '</select></label>' +
+          '<label class="doc-code-pad-font-label">Font <select class="doc-code-pad-font-family" aria-label="Font family">' + familyOpts + '</select></label>' +
+        '</div>' +
+      '</div>' +
+      '<div class="doc-code-pad-window">' +
+        '<pre class="line-numbers"><code class="language-python">' + escapeHtml(code) + '</code></pre>' +
+      '</div>' +
+      '</div>';
+    docEl.innerHTML = html;
+    var codeEl = docEl.querySelector('.doc-code-pad code');
+    if (typeof Prism !== 'undefined' && codeEl) {
+      Prism.highlightElement(codeEl);
+    }
+    var themeSelect = docEl.querySelector('.doc-code-pad-theme');
+    if (themeSelect) themeSelect.addEventListener('change', function () { setCodeTheme(themeSelect.value); });
+    var sizeSelect = docEl.querySelector('.doc-code-pad-font-size');
+    if (sizeSelect) sizeSelect.addEventListener('change', function () { setCodeFontSize(sizeSelect.value); });
+    var familySelect = docEl.querySelector('.doc-code-pad-font-family');
+    if (familySelect) familySelect.addEventListener('change', function () { setCodeFontFamily(familySelect.value); });
+    docEl.classList.remove('hidden');
+  }
+
   var lastRepos = [];
   var repoSourceTypeMap = {};
   var REPO_ORDER_KEY = 'draft-repo-order';
@@ -662,6 +711,68 @@
     var p = (path || '').toLowerCase();
     return BINARY_DOC_EXTS.some(function (ext) { return p.endsWith(ext); });
   }
+  function isPythonDoc(path) {
+    return (path || '').toLowerCase().endsWith('.py');
+  }
+
+  var CODE_THEME_KEY = 'draft-code-theme';
+  var CODE_THEMES = [
+    { value: 'dark-tomorrow', label: 'Tomorrow Night', dark: true },
+    { value: 'dark-dracula', label: 'Dracula', dark: true },
+    { value: 'dark-nord', label: 'Nord', dark: true },
+    { value: 'light-gh', label: 'GitHub', dark: false },
+    { value: 'light-coy', label: 'Coy', dark: false },
+    { value: 'light-default', label: 'Default Light', dark: false }
+  ];
+  function getCodeTheme() {
+    try {
+      var t = localStorage.getItem(CODE_THEME_KEY);
+      if (t && CODE_THEMES.some(function (x) { return x.value === t; })) return t;
+    } catch (e) {}
+    return getTheme() === 'bright' ? 'light-gh' : 'dark-tomorrow';
+  }
+  function setCodeTheme(value) {
+    try { localStorage.setItem(CODE_THEME_KEY, value); } catch (e) {}
+    var pad = document.querySelector('.doc-code-pad');
+    if (pad) pad.setAttribute('data-code-theme', value);
+  }
+
+  var CODE_FONT_SIZE_KEY = 'draft-code-font-size';
+  var CODE_FONT_FAMILY_KEY = 'draft-code-font-family';
+  var CODE_FONT_SIZES = [
+    { value: 'small', label: 'Small', size: '12px' },
+    { value: 'medium', label: 'Medium', size: '14px' },
+    { value: 'large', label: 'Large', size: '16px' }
+  ];
+  var CODE_FONT_FAMILIES = [
+    { value: 'jetbrains', label: 'JetBrains Mono', family: '"JetBrains Mono", monospace' },
+    { value: 'fira', label: 'Fira Code', family: '"Fira Code", monospace' },
+    { value: 'system', label: 'System', family: 'ui-monospace, "Cascadia Code", monospace' }
+  ];
+  function getCodeFontSize() {
+    try {
+      var v = localStorage.getItem(CODE_FONT_SIZE_KEY);
+      if (v && CODE_FONT_SIZES.some(function (x) { return x.value === v; })) return v;
+    } catch (e) {}
+    return 'medium';
+  }
+  function setCodeFontSize(value) {
+    try { localStorage.setItem(CODE_FONT_SIZE_KEY, value); } catch (e) {}
+    var pad = document.querySelector('.doc-code-pad');
+    if (pad) pad.setAttribute('data-code-font-size', value);
+  }
+  function getCodeFontFamily() {
+    try {
+      var v = localStorage.getItem(CODE_FONT_FAMILY_KEY);
+      if (v && CODE_FONT_FAMILIES.some(function (x) { return x.value === v; })) return v;
+    } catch (e) {}
+    return 'jetbrains';
+  }
+  function setCodeFontFamily(value) {
+    try { localStorage.setItem(CODE_FONT_FAMILY_KEY, value); } catch (e) {}
+    var pad = document.querySelector('.doc-code-pad');
+    if (pad) pad.setAttribute('data-code-font-family', value);
+  }
 
   var DOC_HASH_PREFIX = 'doc/';
   var DOC_STORAGE_KEY = 'draft-current-doc';
@@ -722,11 +833,13 @@
           }
           setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 60000);
         } else {
-          var md = data;
-          if (typeof marked !== 'undefined') {
-            showDoc(marked.parse(md, { gfm: true }), sourceType);
+          var text = data;
+          if (isPythonDoc(path)) {
+            showPythonCodePad(text, path, sourceType);
+          } else if (typeof marked !== 'undefined') {
+            showDoc(marked.parse(text, { gfm: true }), sourceType);
           } else {
-            showDoc('<pre>' + escapeHtml(md) + '</pre>', sourceType);
+            showDoc('<pre>' + escapeHtml(text) + '</pre>', sourceType);
           }
         }
       })
@@ -1004,7 +1117,16 @@
               citationsEl.innerHTML = data.citations.map(function (c, i) {
                 var num = i + 1;
                 var label = c.repo + '/' + c.path + (c.heading ? ' — ' + c.heading : '');
-                return num + '. <a href="#" data-repo="' + escapeAttr(c.repo) + '" data-path="' + escapeAttr(c.path) + '">' + escapeHtml(label) + '</a>';
+                if (c.start_line != null && c.end_line != null) {
+                  label += ' (lines ' + c.start_line + '–' + c.end_line + ')';
+                }
+                var block = '<div class="ask-citation-item">' +
+                  num + '. <a href="#" data-repo="' + escapeAttr(c.repo) + '" data-path="' + escapeAttr(c.path) + '">' + escapeHtml(label) + '</a>';
+                if (c.snippet) {
+                  block += '<pre class="ask-citation-snippet">' + escapeHtml(c.snippet) + '</pre>';
+                }
+                block += '</div>';
+                return block;
               }).join('');
               citationsEl.classList.remove('hidden');
               citationsEl.querySelectorAll('a').forEach(function (a) {

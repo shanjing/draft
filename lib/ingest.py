@@ -1,6 +1,15 @@
 """
-Ingest vault and .doc_sources (under ~/.draft) into a Chroma vector store for RAG.
-Uses same file exclusions as scripts/pull.py. Rebuilds the collection on each run.
+This is the main module to build indexes for Draft's RAG.
+It is invoked by scripts/index_for_ai.py and the UI reindex action.
+
+There are two main functions in this module:
+1.collect_chunks(): Reads the repo list from sources.yaml (get_sources_yaml_path + parse_sources_yaml),
+  walks vault and each repo's effective root, and uses lib.chunking (chunk_markdown / chunk_python) to
+  turn .md and .py files into chunks. Returns list[Chunk].
+2.build_index(): Calls collect_chunks(), embeds the chunks, and writes them to the Chroma vector store.
+
+Note:
+It uses same file exclusions as scripts/pull.py. Rebuilds the collection on each run.
 """
 import contextlib
 import io
@@ -9,8 +18,10 @@ import os
 import warnings
 from pathlib import Path
 
-from lib.chunking import chunk_markdown, Chunk
-from lib.paths import get_doc_sources_root, get_vault_root
+from lib.chunking import chunk_markdown, chunk_python, Chunk
+from lib.gitignore import get_git_ignored_set
+from lib.manifest import parse_sources_yaml
+from lib.paths import get_effective_repo_root, get_sources_yaml_path, get_vault_root
 
 # Same exclusions as pull.py (do not depend on scripts)
 EXCLUDE_TOPLEVEL = {"README.md"}
@@ -34,6 +45,7 @@ COLLECTION_NAME = "draft_docs"
 # nomic-embed-text-v1.5 requires trust_remote_code=True. Alternative: "sentence-transformers/all-MiniLM-L6-v2" (no trust_remote_code).
 EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 TRUST_REMOTE_CODE = True
+# quick/deep apply to both .md and .py chunking (code is included in the index).
 INDEX_PROFILES = {
     "quick": {
         "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
@@ -71,10 +83,11 @@ def collect_chunks(
     chunk_max_chars: int = 2400,
     chunk_overlap_paras: int = 1,
 ) -> list[Chunk]:
-    """Collect chunks from ~/.draft/vault and ~/.draft/.doc_sources/<repo>/*.md (same exclusions as pull)."""
+    """Collect chunks from vault and from each repo's effective root (sources.yaml; no copy)."""
     chunks: list[Chunk] = []
     vault_dir = get_vault_root()
     if vault_dir.is_dir():
+        vault_candidates: list[tuple[str, Path]] = []
         for f in vault_dir.rglob("*.md"):
             try:
                 rel = f.relative_to(vault_dir)
@@ -83,52 +96,121 @@ def collect_chunks(
                 continue
             if not should_include(path_str):
                 continue
+            vault_candidates.append((path_str, f))
+        for f in vault_dir.rglob("*.py"):
             try:
-                content = f.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            for c in chunk_markdown(
-                "vault",
-                path_str,
-                content,
-                chunk_max_chars=chunk_max_chars,
-                chunk_overlap_paras=chunk_overlap_paras,
-            ):
-                chunks.append(c)
-    sources_dir = get_doc_sources_root()
-    if not sources_dir.is_dir():
-        return chunks
-    for repo_dir in sorted(sources_dir.iterdir()):
-        if not repo_dir.is_dir() or repo_dir.name.startswith("."):
-            continue
-        repo = repo_dir.name
-        for f in repo_dir.rglob("*.md"):
-            try:
-                rel = f.relative_to(repo_dir)
+                rel = f.relative_to(vault_dir)
                 path_str = rel.as_posix()
             except ValueError:
                 continue
             if not should_include(path_str):
                 continue
+            vault_candidates.append((path_str, f))
+        vault_ignored = get_git_ignored_set(vault_dir, [p for p, _ in vault_candidates])
+        for path_str, f in vault_candidates:
+            if path_str in vault_ignored:
+                continue
             try:
                 content = f.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
+            if f.suffix.lower() == ".py":
+                for c in chunk_python(
+                    "vault",
+                    path_str,
+                    content,
+                    chunk_max_chars=chunk_max_chars,
+                ):
+                    chunks.append(c)
+            else:
+                for c in chunk_markdown(
+                    "vault",
+                    path_str,
+                    content,
+                    chunk_max_chars=chunk_max_chars,
+                    chunk_overlap_paras=chunk_overlap_paras,
+                ):
+                    chunks.append(c)
+    sources_yaml = get_sources_yaml_path()
+    if not sources_yaml.is_file():
+        return chunks
+    repos = parse_sources_yaml(sources_yaml)
+    for name, repo in sorted(repos.items()):
+        if name == "vault":
+            continue
+        source = (repo.get("source") or "").strip()
+        if not source:
+            continue
+        repo_root = get_effective_repo_root(name, source, draft_root)
+        if repo_root.is_file() and repo_root.suffix == ".md":
+            try:
+                content = repo_root.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
             for c in chunk_markdown(
-                repo,
-                path_str,
+                name,
+                repo_root.name,
                 content,
                 chunk_max_chars=chunk_max_chars,
                 chunk_overlap_paras=chunk_overlap_paras,
             ):
                 chunks.append(c)
+            continue
+        if not repo_root.is_dir():
+            continue
+        # Collect (path_str, f) for .md and .py passing should_include, then filter by .gitignore
+        candidates: list[tuple[str, Path]] = []
+        for f in repo_root.rglob("*.md"):
+            try:
+                rel = f.relative_to(repo_root)
+                path_str = rel.as_posix()
+            except ValueError:
+                continue
+            if not should_include(path_str):
+                continue
+            candidates.append((path_str, f))
+        for f in repo_root.rglob("*.py"):
+            try:
+                rel = f.relative_to(repo_root)
+                path_str = rel.as_posix()
+            except ValueError:
+                continue
+            if not should_include(path_str):
+                continue
+            candidates.append((path_str, f))
+        ignored = get_git_ignored_set(repo_root, [p for p, _ in candidates])
+        for path_str, f in candidates:
+            if path_str in ignored:
+                continue
+            try:
+                content = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if f.suffix.lower() == ".py":
+                for c in chunk_python(
+                    name,
+                    path_str,
+                    content,
+                    chunk_max_chars=chunk_max_chars,
+                ):
+                    chunks.append(c)
+            else:
+                for c in chunk_markdown(
+                    name,
+                    path_str,
+                    content,
+                    chunk_max_chars=chunk_max_chars,
+                    chunk_overlap_paras=chunk_overlap_paras,
+                ):
+                    chunks.append(c)
     return chunks
 
-
+# the main function to build the index for the RAG
+# this is invoked by scripts/index_for_ai.py and the UI reindex action.
 def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick") -> int:
     """
-    Rebuild the Chroma vector store from draft/<repo>/*.md.
-    Returns the number of chunks indexed.
+    Rebuild the Chroma vector store from vault and each repo's effective root:
+    .md (by section/paragraph) and .py (by ast def/class). Returns the number of chunks indexed.
     """
     os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
     os.environ.setdefault("POSTHOG_DISABLED", "1")
@@ -177,7 +259,7 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     )
     if not chunks:
         if verbose:
-            print("No .md chunks to index.")
+            print("No chunks to index (docs + code).")
         return 0
 
     persist_dir = draft_root / VECTOR_DIR
@@ -231,14 +313,17 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
             convert_to_numpy=True,
         )
         ids = [f"chunk_{i}" for i in range(start, end)]
-        metadatas = [
-            {
+        metadatas = []
+        for c in batch:
+            meta: dict = {
                 "repo": c.repo,
                 "path": c.path,
                 "heading": (c.heading[:200] if c.heading else ""),
             }
-            for c in batch
-        ]
+            if c.start_line is not None and c.end_line is not None:
+                meta["start_line"] = c.start_line
+                meta["end_line"] = c.end_line
+            metadatas.append(meta)
         collection.add(
             ids=ids,
             embeddings=embeddings.tolist(),

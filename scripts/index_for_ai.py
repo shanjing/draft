@@ -5,8 +5,9 @@ Run from the draft repo root. Uses same file exclusions as pull.py.
 """
 import os
 import sys
-import argparse
 from pathlib import Path
+
+import click
 
 # Disable Chroma telemetry before any chromadb import
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
@@ -26,18 +27,17 @@ sys.path.insert(0, str(DRAFT_ROOT))
 from lib.ingest import build_index
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Rebuild Draft RAG index.")
-    parser.add_argument(
-        "--profile",
-        choices=["quick", "deep"],
-        default="quick",
-        help="Index profile: quick (default, faster) or deep (higher-quality, nomic).",
-    )
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose progress output.")
-    args = parser.parse_args()
-    n = build_index(DRAFT_ROOT, verbose=args.verbose, profile=args.profile)
-    print(f"Indexed {n} chunks.")
+@click.command(help="Rebuild Draft RAG index.")
+@click.option(
+    "--profile",
+    type=click.Choice(["quick", "deep"], case_sensitive=False),
+    default="quick",
+    help="Index profile: quick (default, faster) or deep (higher-quality, nomic).",
+)
+@click.option("-v", "--verbose", is_flag=True, help="Verbose progress output.")
+def main(profile: str, verbose: bool) -> None:
+    n = build_index(DRAFT_ROOT, verbose=verbose, profile=profile)
+    click.echo(f"Indexed {n} chunks.")
 
 
 if __name__ == "__main__":

@@ -19,6 +19,11 @@ sources.yaml
 .vector_store/
 .cache/
 .draft-ui.log
+.draft_test
+.clones
+.draft
+.doc_sources
+vault
 
 # Cloned GitHub sources (setup.sh)
 .sources/

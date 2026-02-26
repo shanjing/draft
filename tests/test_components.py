@@ -30,6 +30,26 @@ class TestChunking:
         chunks = chunk_markdown("r", "p.md", md)
         assert len(chunks) >= 2 or (len(chunks) == 1 and "Section" in chunks[0].text)
 
+    def test_chunk_python_returns_chunks_with_line_range(self):
+        from lib.chunking import chunk_python, Chunk
+        code = 'def foo():\n    return 1\n\nclass Bar:\n    def baz(self):\n        pass\n'
+        chunks = chunk_python("repo", "m.py", code)
+        assert len(chunks) >= 1
+        for c in chunks:
+            assert isinstance(c, Chunk)
+            assert c.repo == "repo"
+            assert c.path == "m.py"
+            assert c.start_line is not None
+            assert c.end_line is not None
+            assert c.start_line >= 1 and c.end_line >= c.start_line
+
+    def test_chunk_python_syntax_error_fallback(self):
+        from lib.chunking import chunk_python
+        chunks = chunk_python("r", "bad.py", "def ( invalid\n")
+        assert len(chunks) == 1
+        assert chunks[0].heading == "<module>"
+        assert chunks[0].start_line == 1
+
 
 class TestIngest:
     """lib.ingest: should_include, collect_chunks, build_index."""

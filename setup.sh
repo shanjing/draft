@@ -214,6 +214,24 @@ list_repo_names_in_yaml() {
   ' "$SOURCES_YAML" 2>/dev/null
 }
 
+# Output "name<TAB>source" per repo (for consistency check: GitHub -> .clones, local -> path).
+list_repos_name_and_source() {
+  [ ! -f "$SOURCES_YAML" ] && return
+  awk '
+    /^[[:space:]]{2,}[A-Za-z0-9_.-]+[[:space:]]*:[[:space:]]*$/ {
+      n = $1; gsub(/^[[:space:]]+|[[:space:]]*:[[:space:]]*$/, "", n);
+      if (n != "repos" && n != "source") name = n;
+      next;
+    }
+    /^[[:space:]]+source:[[:space:]]/ && name != "" {
+      src = $0; gsub(/^[[:space:]]+source:[[:space:]]*/, "", src);
+      print name "\t" src;
+      name = "";
+      next;
+    }
+  ' "$SOURCES_YAML" 2>/dev/null
+}
+
 # Make sources.yaml follow actual content: add entries for vault (if dir exists) and for each
 # .doc_sources subdir that is not in sources.yaml. True source of truth for content is disk;
 # sources.yaml is source of truth only among config files.
@@ -244,26 +262,40 @@ sync_sources_yaml_from_content() {
   fi
 }
 
-# Check consistency between sources.yaml and disk. Warn only when yaml lists something missing
-# on disk (do not auto-remove; user may be about to run Pull). Orphans are already fixed by sync_sources_yaml_from_content.
+# Check consistency between sources.yaml and disk. Warn only when yaml lists something missing.
+# GitHub repos: content in .clones/<name>. Local: content at source path (no .doc_sources copy).
 check_sources_consistency() {
   [ ! -f "$SOURCES_YAML" ] && return
-  local name
+  local name source resolved
   local warnings=0
-  while IFS= read -r name; do
-    [ -z "$name" ] && continue
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    name="${line%%$'\t'*}"
+    source="${line#*$'\t'}"
+    source="$(printf '%s' "$source" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     if [ "$name" = "vault" ]; then
       if [ ! -d "$DRAFT_HOME/vault" ]; then
-        printf "  ${D}%s: vault listed in sources.yaml but %s/vault not found (create dir or run Pull).${N}\n" "$name" "$DRAFT_HOME"
+        printf "  ${D}%s: vault listed in sources.yaml but %s/vault not found (create dir).${N}\n" "$name" "$DRAFT_HOME"
+        warnings=1
+      fi
+    elif [ -n "$source" ] && [[ "$source" == *github.com* ]]; then
+      if [ ! -d "$DRAFT_HOME/.clones/$name" ]; then
+        printf "  ${D}%s: listed in sources.yaml but %s/.clones/%s not found (run Pull).${N}\n" "$name" "$DRAFT_HOME" "$name"
         warnings=1
       fi
     else
-      if [ ! -d "$DRAFT_HOME/.doc_sources/$name" ]; then
-        printf "  ${D}%s: listed in sources.yaml but %s/.doc_sources/%s not found (run Pull).${N}\n" "$name" "$DRAFT_HOME" "$name"
-        warnings=1
+      if [ -n "$source" ]; then
+        case "$source" in
+          /*) resolved="$source" ;;
+          *)  resolved="$SCRIPT_DIR/$source" ;;
+        esac
+        if [ ! -d "$resolved" ]; then
+          printf "  ${D}%s: listed in sources.yaml but path not found: %s (run Pull or fix path).${N}\n" "$name" "$resolved"
+          warnings=1
+        fi
       fi
     fi
-  done < <(list_repo_names_in_yaml)
+  done < <(list_repos_name_and_source)
   if [ "$warnings" = "1" ]; then
     printf "${D}Consistency: see warnings above.${N}\n"
   else
@@ -413,7 +445,7 @@ do_add_sources_flow() {
         printf "  ${R}Repo not found or not reachable.${N}\n"
         continue
       fi
-      printf "  ${G}✓${N} Repo is reachable. .md files will be fetched from GitHub (no local clone).\n"
+      printf "  ${G}✓${N} Repo is reachable. Pull will clone/pull via git and sync .md files.\n"
       echo ""
       read -r -p "Add this GitHub source? (y/N): " yn
       yn="${yn:-n}"
