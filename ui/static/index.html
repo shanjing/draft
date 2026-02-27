@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Source+Serif+4:ital,wght@0,400;0,600&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600&family=Merriweather:ital,wght@0,400;0,700&family=Open+Sans:wght@400;600&family=Crimson+Pro:ital,wght@0,400;0,600&family=IBM+Plex+Sans:wght@400;600&family=Noto+Serif:ital,wght@0,400;0,600&family=Inter:wght@400;600&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&icon_names=home,search,sync,unfold_less,unfold_more,push_pin,expand_more,bookmark_add&display=block" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css" id="prism-base-theme">
@@ -20,11 +21,12 @@
 <body>
   <header class="header">
     <div class="header-left">
-      <button type="button" id="btn-home" class="btn btn-icon" title="Home"><span class="material-symbols-outlined" aria-hidden="true">home</span></button>
       <div class="header-title-block">
         <h1>Draft</h1>
         <p class="tagline">Your personal knowledge base</p>
-        <button type="button" id="theme-switch" class="theme-switch" role="switch" aria-label="Toggle bright theme" title="Night / Bright"><span class="theme-switch-thumb"></span></button>
+        <div class="header-switches">
+          <button type="button" id="theme-switch" class="theme-switch" role="switch" aria-label="Toggle bright theme" title="Night / Bright"><span class="theme-switch-thumb"></span></button>
+        </div>
       </div>
     </div>
     <div class="header-right search-wrap">
@@ -74,9 +76,60 @@
           </div>
         </div>
       </div>
-      <div id="placeholder" class="placeholder">Select a document from the tree.</div>
-      <article id="doc" class="doc hidden"></article>
-      <div id="error" class="error hidden"></div>
+      <div id="doc-viewer-toolbar" class="doc-viewer-toolbar hidden" aria-label="Document view options">
+        <label class="doc-viewer-label">Font <select id="doc-font-select" class="doc-viewer-select" aria-label="Document font"></select></label>
+        <label class="doc-viewer-label">Size <select id="doc-font-size-select" class="doc-viewer-select" aria-label="Document font size"><option value="small">small</option><option value="medium" selected>medium</option><option value="large">large</option></select></label>
+        <label class="doc-viewer-label">Theme <select id="doc-theme-select" class="doc-viewer-select" aria-label="Document theme"></select></label>
+        <button type="button" id="doc-set-default-btn" class="doc-viewer-set-default" title="Set current font & theme as default" aria-label="Set current font and theme as default">⭐</button>
+        <label class="doc-viewer-label">Lines <select id="doc-reader-lines" class="doc-viewer-select" aria-label="Reader window height in lines"><option value="60">60</option><option value="80">80</option><option value="120" selected>120</option><option value="160">160</option><option value="240">240</option></select></label>
+      </div>
+      <div id="doc-tabs" class="doc-tabs">
+        <div class="doc-tab-bar" role="tablist" aria-label="Document tabs">
+          <button type="button" id="btn-sidebar-toggle" class="theme-switch sidebar-switch doc-tab-bar-sidebar-toggle" role="switch" aria-label="Show/hide sidebar" title="Show/hide sidebar" aria-checked="true"><span class="theme-switch-thumb"></span></button>
+          <span class="doc-tab-bar-sep" aria-hidden="true"></span>
+          <div class="doc-tab-layout">
+            <button type="button" class="doc-layout-btn active" id="doc-layout-stacked" data-layout="stacked" title="stacked (one over the other)">stacked</button>
+            <button type="button" class="doc-layout-btn" id="doc-layout-side" data-layout="side-by-side" title="side by side">side by side</button>
+            <span class="doc-tab-nums" aria-label="Switch tab">
+              <button type="button" class="doc-tab-num" id="doc-tab-num-1" data-tab="1" title="Tab 1">1</button>
+              <button type="button" class="doc-tab-num" id="doc-tab-num-2" data-tab="2" title="Tab 2">2</button>
+            </span>
+            <button type="button" class="doc-swap-btn hidden" id="doc-swap-btn" title="swap left and right">⇄ swap</button>
+          </div>
+        </div>
+        <div id="doc-tabs-content" class="doc-tabs-content stacked">
+          <div class="doc-pane doc-pane-1 active" id="doc-pane-1" data-pane="1">
+            <span class="doc-pane-actions">
+              <button type="button" class="doc-pane-save-vault hidden" id="btn-save-to-vault-1" data-pane="1" title="Save this document to vault" aria-label="Save to vault">🔐</button>
+              <div class="doc-pane-history" id="doc-pane-history-1" data-pane="1">
+                <button type="button" class="doc-history-trigger doc-pane-history-trigger" id="doc-history-trigger-1" data-pane="1" aria-expanded="false" aria-haspopup="true" title="Recent documents in this tab">Recent</button>
+                <div class="doc-history-dropdown hidden" id="doc-history-dropdown-1" role="menu" aria-label="Recent documents"></div>
+              </div>
+              <span class="doc-pane-label" aria-hidden="true">tab 1</span>
+            </span>
+            <div class="doc-reader-window" id="doc-reader-window-1">
+              <div class="placeholder doc-pane-placeholder" id="placeholder-1">Select a document from the tree.</div>
+              <article class="doc doc-pane-doc hidden" id="doc-1"></article>
+              <div class="error doc-pane-error hidden" id="error-1"></div>
+            </div>
+          </div>
+          <div class="doc-pane doc-pane-2" id="doc-pane-2" data-pane="2">
+            <span class="doc-pane-actions">
+              <button type="button" class="doc-pane-save-vault hidden" id="btn-save-to-vault-2" data-pane="2" title="Save this document to vault" aria-label="Save to vault">🔐</button>
+              <div class="doc-pane-history" id="doc-pane-history-2" data-pane="2">
+                <button type="button" class="doc-history-trigger doc-pane-history-trigger" id="doc-history-trigger-2" data-pane="2" aria-expanded="false" aria-haspopup="true" title="Recent documents in this tab">Recent</button>
+                <div class="doc-history-dropdown hidden" id="doc-history-dropdown-2" role="menu" aria-label="Recent documents"></div>
+              </div>
+              <span class="doc-pane-label" aria-hidden="true">tab 2</span>
+            </span>
+            <div class="doc-reader-window" id="doc-reader-window-2">
+              <div class="placeholder doc-pane-placeholder" id="placeholder-2">Select a document from the tree.</div>
+              <article class="doc doc-pane-doc hidden" id="doc-2"></article>
+              <div class="error doc-pane-error hidden" id="error-2"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
   <script src="/app.js"></script>

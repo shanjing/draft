@@ -32,3 +32,4 @@ vault
 *.swp
 *~
 vault/
+.draft-ui.pid
