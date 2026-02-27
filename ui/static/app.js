@@ -1154,7 +1154,7 @@
     return (path || '').split('/').pop() || path || '';
   }
   function docHistoryLabel(item) {
-    return item.repo + ' / ' + docHistoryFilename(item.path);
+    return item.repo + ': ' + docHistoryFilename(item.path);
   }
 
   function renderDocHistory(tab) {
@@ -1174,9 +1174,8 @@
       ? '<div class="doc-history-empty">No recent documents.</div>'
       : list.map(function (item) {
           var filename = docHistoryFilename(item.path);
-          return '<button type="button" class="doc-history-item" role="menuitem" data-repo="' + escapeAttr(item.repo) + '" data-path="' + escapeAttr(item.path) + '" title="' + escapeAttr(item.repo + ' / ' + item.path) + '">' +
-            '<span class="doc-history-item-repo">' + escapeHtml(item.repo) + '</span>' +
-            '<span class="doc-history-item-path">' + escapeHtml(filename) + '</span></button>';
+          return '<button type="button" class="doc-history-item" role="menuitem" data-repo="' + escapeAttr(item.repo) + '" data-path="' + escapeAttr(item.path) + '" title="' + escapeAttr(docHistoryLabel(item)) + '">' +
+            '<span class="doc-history-item-repo">' + escapeHtml(item.repo) + '</span>: <span class="doc-history-item-path">' + escapeHtml(filename) + '</span></button>';
         }).join('');
     dropdown.querySelectorAll('.doc-history-item').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -1285,6 +1284,31 @@
     });
   })();
 
+  var pendingScrollToLine = null;
+
+  function applyPendingScrollToLine() {
+    if (!pendingScrollToLine || pendingScrollToLine.line < 1) return;
+    var line = pendingScrollToLine.line;
+    pendingScrollToLine = null;
+    var docEl = getDocEl(activeTab);
+    if (!docEl) return;
+    var codeWindow = docEl.querySelector('.doc-code-pad-window');
+    var container = codeWindow || docEl.closest('.doc-reader-window');
+    if (!container) return;
+    var pre = docEl.querySelector('.doc-code-pad-window pre, pre');
+    var lineHeight = 22;
+    if (pre) {
+      var style = window.getComputedStyle(pre);
+      var fs = parseFloat(style.fontSize) || 14;
+      var lh = style.lineHeight;
+      if (lh && lh !== 'normal') lineHeight = parseFloat(lh); else lineHeight = fs * 1.5;
+    }
+    var scrollTop = Math.max(0, (line - 1) * lineHeight - 20);
+    requestAnimationFrame(function () {
+      if (container) container.scrollTop = scrollTop;
+    });
+  }
+
   function loadDoc(repo, path, sourceType) {
     currentDoc = { repo: repo, path: path };
     paneDocs[activeTab] = { repo: repo, path: path };
@@ -1321,9 +1345,11 @@
         addToDocHistory(repo, path, activeTab);
         renderDocHistory(activeTab);
         savePanesState();
+        applyPendingScrollToLine();
       })
       .catch(function (err) {
         showError(err.message || 'Failed to load document.');
+        pendingScrollToLine = null;
       });
   }
 
@@ -1637,8 +1663,11 @@
                 if (c.start_line != null && c.end_line != null) {
                   label += ' (lines ' + c.start_line + '–' + c.end_line + ')';
                 }
+                var attrs = 'data-repo="' + escapeAttr(c.repo) + '" data-path="' + escapeAttr(c.path) + '"';
+                if (c.start_line != null) attrs += ' data-start-line="' + String(c.start_line) + '"';
+                if (c.end_line != null) attrs += ' data-end-line="' + String(c.end_line) + '"';
                 var block = '<div class="ask-citation-item">' +
-                  num + '. <a href="#" data-repo="' + escapeAttr(c.repo) + '" data-path="' + escapeAttr(c.path) + '">' + escapeHtml(label) + '</a>';
+                  num + '. <a href="#" ' + attrs + '>' + escapeHtml(label) + '</a>';
                 if (c.snippet) {
                   block += '<pre class="ask-citation-snippet">' + escapeHtml(c.snippet) + '</pre>';
                 }
@@ -1649,6 +1678,11 @@
               citationsEl.querySelectorAll('a').forEach(function (a) {
                 a.addEventListener('click', function (e) {
                   e.preventDefault();
+                  var startLine = a.dataset.startLine;
+                  if (startLine) {
+                    var n = parseInt(startLine, 10);
+                    if (n >= 1) pendingScrollToLine = { line: n };
+                  }
                   loadDoc(a.dataset.repo, a.dataset.path);
                 });
               });
