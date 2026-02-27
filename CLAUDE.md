@@ -15,10 +15,12 @@ This repo stores private documents (tech details, drafts) extracted from other r
 - **`docs/storage-and-metadata-design.md`** — Storage layer, vault, **sources.yaml** as source of truth, manifest, file registry, reconnection; includes architecture diagram (Mermaid) and vault improvements.
 - **`docs/intelligence-layer-design.md`** — Intelligence layer (embeddings, RAG, LLM).
 - **`docs/local-oracle-design.md`** — Local oracle / Q&A over docs.
+- **`docs/RAG-design-principles.md`** — RAG design: chunking (.md + .py via ast), ingest from vault and effective roots, Chroma, citations with code snippets, Operations (rebuild index: `scripts/index_for_ai.py --profile quick|deep`).
+- **`docs/CLAUDE.md`** — Agent workflow and principles (plan mode, subagents, verification, task management).
 
 ---
 
-**Document UI:** Web UI (**`ui/`**, FastAPI + static frontend) serves the document tree, renders markdown, and supports Pull, Add source (GitHub URL or local path), full-text search (Whoosh), and pinning repos. Full-text search uses an index under **`.search_index/`**; it is rebuilt after each Pull or via **`POST /api/reindex`**. Endpoints: **`GET /api/tree`**, **`GET /api/doc/{repo}/{path}`**, **`GET /api/search?q=...`**, **`POST /api/pull`**, **`POST /api/add_source`**, **`POST /api/reindex`**. Run with **`python scripts/serve.py`** or **`uvicorn ui.app:app --host 0.0.0.0 --port 8058`**.
+**Document UI:** Web UI (**`ui/`**, FastAPI + static frontend) serves the document tree, renders markdown, and **`.py`** in a code pad (syntax highlighting, theme/size/font options). Supports Pull, Add source (GitHub URL or local path), full-text search (Whoosh), and pinning repos. **Ask (AI)** runs RAG over indexed docs and code: streamed answers with citations; for code, citations show file, line range, and snippet. Full-text search uses an index under **`.search_index/`** (rebuilt after Pull or **`POST /api/reindex`**). RAG uses Chroma under **`.vector_store/`**; rebuild with **`python scripts/index_for_ai.py --profile quick`** or **`--profile deep`**, or from the UI (**Quick rebuild** / **Deep rebuild**), or **`POST /api/reindex_ai`**. Endpoints: **`GET /api/tree`**, **`GET /api/doc/{repo}/{path}`**, **`GET /api/search?q=...`**, **`POST /api/pull`**, **`POST /api/add_source`**, **`POST /api/reindex`**, **`POST /api/ask`**, **`POST /api/reindex_ai`**. Run with **`python scripts/serve.py`** or **`uvicorn ui.app:app --host 0.0.0.0 --port 8058`**.
 
 ---
 

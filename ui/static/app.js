@@ -1,8 +1,12 @@
 (function () {
   const treeEl = document.getElementById('tree');
-  const placeholderEl = document.getElementById('placeholder');
-  const docEl = document.getElementById('doc');
-  const errorEl = document.getElementById('error');
+  const contentEl = document.querySelector('.content');
+  const docViewerToolbarEl = document.getElementById('doc-viewer-toolbar');
+
+  function getPlaceholderEl(tab) { return document.getElementById('placeholder-' + tab); }
+  function getDocEl(tab) { return document.getElementById('doc-' + tab); }
+  function getErrorEl(tab) { return document.getElementById('error-' + tab); }
+  function getPaneEl(tab) { return document.getElementById('doc-pane-' + tab); }
 
   var THEME_KEY = 'draft-theme';
   function getTheme() {
@@ -22,23 +26,343 @@
     setTheme(getTheme() === 'bright' ? 'night' : 'bright');
   });
 
+  var DOC_FONT_KEY = 'draft-doc-font';
+  var DOC_THEME_KEY = 'draft-doc-theme';
+  var DOC_FONT_SIZE_KEY = 'draft-doc-font-size';
+  var DOC_DEFAULT_FONT_KEY = 'draft-doc-default-font';
+  var DOC_DEFAULT_THEME_KEY = 'draft-doc-default-theme';
+  var DOC_FONT_SIZES = [
+    { value: 'small', label: 'small' },
+    { value: 'medium', label: 'medium' },
+    { value: 'large', label: 'large' }
+  ];
+  var DOC_FONTS = [
+    { value: 'default', label: 'Default' },
+    { value: 'georgia', label: 'Georgia' },
+    { value: 'lora', label: 'Lora' },
+    { value: 'source-serif', label: 'Source Serif 4' },
+    { value: 'literata', label: 'Literata' },
+    { value: 'merriweather', label: 'Merriweather' },
+    { value: 'open-sans', label: 'Open Sans' },
+    { value: 'crimson-pro', label: 'Crimson Pro' },
+    { value: 'ibm-plex-sans', label: 'IBM Plex Sans' },
+    { value: 'noto-serif', label: 'Noto Serif' },
+    { value: 'inter', label: 'Inter' }
+  ];
+  var DOC_THEMES = [
+    { value: 'default', label: 'Default' },
+    { value: 'sepia', label: 'Sepia' },
+    { value: 'warm', label: 'Warm' },
+    { value: 'cool', label: 'Cool' },
+    { value: 'high-contrast', label: 'High contrast' },
+    { value: 'soft', label: 'Soft' },
+    { value: 'midnight', label: 'Midnight' },
+    { value: 'coal', label: 'Coal' },
+    { value: 'nord', label: 'Nord' },
+    { value: 'dracula', label: 'Dracula' },
+    { value: 'forest', label: 'Forest' },
+    { value: 'rose', label: 'Rose' },
+    { value: 'slate', label: 'Slate' }
+  ];
+  function getDocFont() {
+    try {
+      var v = localStorage.getItem(DOC_FONT_KEY);
+      if (v && DOC_FONTS.some(function (x) { return x.value === v; })) return v;
+    } catch (e) {}
+    return 'default';
+  }
+  function getDefaultDocFont() {
+    try {
+      var v = localStorage.getItem(DOC_DEFAULT_FONT_KEY);
+      if (v && DOC_FONTS.some(function (x) { return x.value === v; })) return v;
+    } catch (e) {}
+    return 'default';
+  }
+  function getEffectiveDocFont() {
+    var sel = getDocFont();
+    return sel === 'default' ? getDefaultDocFont() : sel;
+  }
+  function setDocFont(value) {
+    try { localStorage.setItem(DOC_FONT_KEY, value); } catch (e) {}
+    if (contentEl) contentEl.setAttribute('data-doc-font', value === 'default' ? getDefaultDocFont() : value);
+  }
+  function getDocTheme() {
+    try {
+      var v = localStorage.getItem(DOC_THEME_KEY);
+      if (v && DOC_THEMES.some(function (x) { return x.value === v; })) return v;
+    } catch (e) {}
+    return 'default';
+  }
+  function getDefaultDocTheme() {
+    try {
+      var v = localStorage.getItem(DOC_DEFAULT_THEME_KEY);
+      if (v && DOC_THEMES.some(function (x) { return x.value === v; })) return v;
+    } catch (e) {}
+    return 'default';
+  }
+  function getEffectiveDocTheme() {
+    var sel = getDocTheme();
+    return sel === 'default' ? getDefaultDocTheme() : sel;
+  }
+  function setDocTheme(value) {
+    try { localStorage.setItem(DOC_THEME_KEY, value); } catch (e) {}
+    if (contentEl) contentEl.setAttribute('data-doc-theme', value === 'default' ? getDefaultDocTheme() : value);
+  }
+  function getDocFontSize() {
+    try {
+      var v = localStorage.getItem(DOC_FONT_SIZE_KEY);
+      if (v && DOC_FONT_SIZES.some(function (x) { return x.value === v; })) return v;
+    } catch (e) {}
+    return 'medium';
+  }
+  function setDocFontSize(value) {
+    try { localStorage.setItem(DOC_FONT_SIZE_KEY, value); } catch (e) {}
+    if (contentEl) contentEl.setAttribute('data-doc-font-size', value);
+  }
+  function applyDocViewOptions() {
+    if (contentEl) {
+      contentEl.setAttribute('data-doc-font', getEffectiveDocFont());
+      contentEl.setAttribute('data-doc-theme', getEffectiveDocTheme());
+      contentEl.setAttribute('data-doc-font-size', getDocFontSize());
+    }
+  }
+  function setCurrentAsDefault() {
+    try {
+      localStorage.setItem(DOC_DEFAULT_FONT_KEY, getEffectiveDocFont());
+      localStorage.setItem(DOC_DEFAULT_THEME_KEY, getEffectiveDocTheme());
+    } catch (e) {}
+    applyDocViewOptions();
+  }
+  applyDocViewOptions();
+
+  var DOC_READER_LINES_KEY = 'draft-doc-reader-lines';
+  var DOC_READER_LINES_OPTS = [60, 80, 120, 160, 240];
+  function getDocReaderLines() {
+    try {
+      var v = parseInt(localStorage.getItem(DOC_READER_LINES_KEY), 10);
+      if (DOC_READER_LINES_OPTS.indexOf(v) !== -1) return v;
+    } catch (e) {}
+    return 120;
+  }
+  function setDocReaderLines(value) {
+    var n = parseInt(value, 10);
+    if (DOC_READER_LINES_OPTS.indexOf(n) === -1) return;
+    try { localStorage.setItem(DOC_READER_LINES_KEY, String(n)); } catch (e) {}
+    applyDocReaderLinesToPanes(n);
+  }
+  var DOC_READER_LINE_HEIGHT_EM = 1.6;
+  function applyDocReaderLinesToPanes(n) {
+    var lines = n !== undefined ? n : getDocReaderLines();
+    var val = String(lines);
+    if (contentEl) contentEl.style.setProperty('--doc-reader-lines', val);
+    var heightVal = (lines * DOC_READER_LINE_HEIGHT_EM) + 'em';
+    [1, 2].forEach(function (tab) {
+      var el = document.getElementById('doc-reader-window-' + tab);
+      if (el) {
+        el.style.setProperty('--doc-reader-lines', val);
+        el.style.flex = 'none';
+        el.style.height = heightVal;
+        el.style.maxHeight = heightVal;
+      }
+    });
+  }
+  function applyDocReaderLines() {
+    applyDocReaderLinesToPanes(getDocReaderLines());
+  }
+  applyDocReaderLines();
+
+  (function initDocViewerToolbar() {
+    var fontSelect = document.getElementById('doc-font-select');
+    var themeSelect = document.getElementById('doc-theme-select');
+    if (!fontSelect || !themeSelect) return;
+    DOC_FONTS.forEach(function (f) {
+      fontSelect.appendChild(document.createElement('option')).value = f.value; fontSelect.lastChild.textContent = f.label;
+    });
+    DOC_THEMES.forEach(function (t) {
+      themeSelect.appendChild(document.createElement('option')).value = t.value; themeSelect.lastChild.textContent = t.label;
+    });
+    fontSelect.value = getDocFont();
+    themeSelect.value = getDocTheme();
+    fontSelect.addEventListener('change', function () { setDocFont(fontSelect.value); });
+    themeSelect.addEventListener('change', function () { setDocTheme(themeSelect.value); });
+    var sizeSelect = document.getElementById('doc-font-size-select');
+    if (sizeSelect) {
+      sizeSelect.value = getDocFontSize();
+      sizeSelect.addEventListener('change', function () { setDocFontSize(sizeSelect.value); });
+    }
+    var linesSelect = document.getElementById('doc-reader-lines');
+    if (linesSelect) {
+      linesSelect.value = String(getDocReaderLines());
+      linesSelect.addEventListener('change', function () { setDocReaderLines(linesSelect.value); });
+    }
+    var setDefaultBtn = document.getElementById('doc-set-default-btn');
+    if (setDefaultBtn) setDefaultBtn.addEventListener('click', setCurrentAsDefault);
+  })();
+
   var currentDoc = null;
+  var activeTab = 1;
+  var layoutMode = 'stacked';
+  var sideBySideSwapped = false;
+  var paneDocs = { 1: null, 2: null };
+
+  var TABS_LAYOUT_KEY = 'draft-tabs-layout';
+  var TABS_SWAPPED_KEY = 'draft-tabs-swapped';
+  var PANE_1_KEY = 'draft-doc-pane-1';
+  var PANE_2_KEY = 'draft-doc-pane-2';
+  var ACTIVE_TAB_KEY = 'draft-doc-active-tab';
+
+  function savePanesState() {
+    try {
+      localStorage.setItem(PANE_1_KEY, paneDocs[1] ? JSON.stringify(paneDocs[1]) : '');
+      localStorage.setItem(PANE_2_KEY, paneDocs[2] ? JSON.stringify(paneDocs[2]) : '');
+      localStorage.setItem(ACTIVE_TAB_KEY, String(activeTab));
+    } catch (e) {}
+  }
+
+  function loadDocIntoPane(tab, repo, path) {
+    var sourceType = repoSourceTypeMap[repo] || 'local';
+    var url = '/api/doc/' + encodeURIComponent(repo) + '/' + path.split('/').map(encodeURIComponent).join('/');
+    return fetch(url)
+      .then(function (r) {
+        if (!r.ok) throw new Error(r.status === 404 ? 'Not found' : 'Failed to load');
+        if (isBinaryDoc(path)) return r.blob();
+        return r.text();
+      })
+      .then(function (data) {
+        paneDocs[tab] = { repo: repo, path: path };
+        if (isBinaryDoc(path)) {
+          var blob = data;
+          var blobUrl = URL.createObjectURL(blob);
+          var ext = path.toLowerCase().slice(path.lastIndexOf('.'));
+          if (ext === '.pdf') {
+            showDoc('<iframe class="doc-binary-view" src="' + escapeAttr(blobUrl) + '" title="PDF"></iframe>', sourceType, tab);
+          } else {
+            showDoc('<p class="doc-download">Binary document. <a href="' + escapeAttr(blobUrl) + '" download="' + escapeAttr(path.split('/').pop()) + '">Download</a></p>', sourceType, tab);
+          }
+          setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 60000);
+        } else {
+          var text = data;
+          if (isPythonDoc(path)) {
+            showPythonCodePad(text, path, sourceType, tab);
+          } else if (typeof marked !== 'undefined') {
+            showDoc(marked.parse(text, { gfm: true }), sourceType, tab);
+          } else {
+            showDoc('<pre>' + escapeHtml(text) + '</pre>', sourceType, tab);
+          }
+        }
+        addToDocHistory(repo, path, tab);
+        renderDocHistory(tab);
+      })
+      .catch(function () {
+        paneDocs[tab] = null;
+        var ph = getPlaceholderEl(tab);
+        var doc = getDocEl(tab);
+        var err = getErrorEl(tab);
+        if (ph) ph.classList.remove('hidden');
+        if (doc) { doc.classList.add('hidden'); doc.innerHTML = ''; }
+        if (err) { err.classList.remove('hidden'); err.textContent = 'Failed to load.'; }
+      });
+  }
+
+  function loadTabsLayout() {
+    try {
+      var m = localStorage.getItem(TABS_LAYOUT_KEY);
+      if (m === 'side-by-side' || m === 'stacked') layoutMode = m;
+      sideBySideSwapped = localStorage.getItem(TABS_SWAPPED_KEY) === '1';
+    } catch (e) {}
+  }
+  function saveTabsLayout() {
+    try {
+      localStorage.setItem(TABS_LAYOUT_KEY, layoutMode);
+      localStorage.setItem(TABS_SWAPPED_KEY, sideBySideSwapped ? '1' : '0');
+    } catch (e) {}
+  }
+
+  function updateTabBarUI() {
+    var stackedBtn = document.getElementById('doc-layout-stacked');
+    var sideBtn = document.getElementById('doc-layout-side');
+    var swapBtn = document.getElementById('doc-swap-btn');
+    var contentWrap = document.getElementById('doc-tabs-content');
+    if (getPaneEl(1)) {
+      getPaneEl(1).classList.toggle('active', layoutMode === 'stacked' ? activeTab === 1 : true);
+      getPaneEl(1).classList.toggle('active-tab', activeTab === 1);
+    }
+    if (getPaneEl(2)) {
+      getPaneEl(2).classList.toggle('active', layoutMode === 'stacked' ? activeTab === 2 : true);
+      getPaneEl(2).classList.toggle('active-tab', activeTab === 2);
+    }
+    if (stackedBtn) stackedBtn.classList.toggle('active', layoutMode === 'stacked');
+    if (sideBtn) sideBtn.classList.toggle('active', layoutMode === 'side-by-side');
+    if (contentWrap) {
+      contentWrap.classList.remove('stacked', 'side-by-side');
+      contentWrap.classList.add(layoutMode === 'side-by-side' ? 'side-by-side' : 'stacked');
+      contentWrap.classList.toggle('swapped', layoutMode === 'side-by-side' && sideBySideSwapped);
+    }
+    if (swapBtn) swapBtn.classList.toggle('hidden', layoutMode !== 'side-by-side');
+    var num1 = document.getElementById('doc-tab-num-1');
+    var num2 = document.getElementById('doc-tab-num-2');
+    if (num1) num1.classList.toggle('active', activeTab === 1);
+    if (num2) num2.classList.toggle('active', activeTab === 2);
+    var vault1 = document.getElementById('btn-save-to-vault-1');
+    var vault2 = document.getElementById('btn-save-to-vault-2');
+    if (vault1) vault1.classList.toggle('hidden', !paneDocs[1]);
+    if (vault2) vault2.classList.toggle('hidden', !paneDocs[2]);
+  }
+
+  function updateToolbarVisibility() {
+    if (!docViewerToolbarEl) return;
+    var hasAny = paneDocs[1] || paneDocs[2];
+    if (hasAny) docViewerToolbarEl.classList.remove('hidden');
+    else docViewerToolbarEl.classList.add('hidden');
+  }
+
+  function clearPane(tabNum) {
+    paneDocs[tabNum] = null;
+    renderDocHistory(tabNum);
+    var ph = getPlaceholderEl(tabNum);
+    var doc = getDocEl(tabNum);
+    var err = getErrorEl(tabNum);
+    if (ph) ph.classList.remove('hidden');
+    if (doc) { doc.classList.add('hidden'); doc.innerHTML = ''; }
+    if (err) err.classList.add('hidden');
+  }
+
+  function afterPanesCleared() {
+    currentDoc = paneDocs[activeTab] || paneDocs[activeTab === 1 ? 2 : 1] || null;
+    updateTabBarUI();
+    updateToolbarVisibility();
+    if (currentDoc) setDocHash(currentDoc.repo, currentDoc.path);
+    else clearDocHash();
+    savePanesState();
+  }
 
   function showPlaceholder(clearStorage) {
-    currentDoc = null;
-    if (clearStorage) clearDocHash();
-    placeholderEl.classList.remove('hidden');
-    docEl.classList.add('hidden');
-    docEl.innerHTML = '';
-    errorEl.classList.add('hidden');
+    var ph = getPlaceholderEl(activeTab);
+    var doc = getDocEl(activeTab);
+    var err = getErrorEl(activeTab);
+    paneDocs[activeTab] = null;
+    renderDocHistory(activeTab);
+    currentDoc = paneDocs[activeTab] || paneDocs[activeTab === 1 ? 2 : 1] || null;
+    if (clearStorage && !paneDocs[1] && !paneDocs[2]) clearDocHash();
+    if (ph) ph.classList.remove('hidden');
+    if (doc) { doc.classList.add('hidden'); doc.innerHTML = ''; }
+    if (err) err.classList.add('hidden');
+    updateTabBarUI();
+    updateToolbarVisibility();
+    if (currentDoc) setDocHash(currentDoc.repo, currentDoc.path);
+    else if (clearStorage) clearDocHash();
+    savePanesState();
   }
 
   function showError(msg) {
     currentDoc = null;
-    placeholderEl.classList.add('hidden');
-    docEl.classList.add('hidden');
-    errorEl.textContent = msg;
-    errorEl.classList.remove('hidden');
+    var ph = getPlaceholderEl(activeTab);
+    var doc = getDocEl(activeTab);
+    var err = getErrorEl(activeTab);
+    if (docViewerToolbarEl) docViewerToolbarEl.classList.add('hidden');
+    if (ph) ph.classList.add('hidden');
+    if (doc) doc.classList.add('hidden');
+    if (err) { err.textContent = msg; err.classList.remove('hidden'); }
   }
 
   function renderMermaidBlocks(container) {
@@ -57,13 +381,17 @@
     mermaid.run({ nodes: container.querySelectorAll('.mermaid') }).catch(function () {});
   }
 
-  function showDoc(html, sourceType) {
-    placeholderEl.classList.add('hidden');
-    errorEl.classList.add('hidden');
-    docEl.innerHTML = html;
+  function showDoc(html, sourceType, tab) {
+    var t = tab !== undefined ? tab : activeTab;
+    var ph = getPlaceholderEl(t);
+    var doc = getDocEl(t);
+    var err = getErrorEl(t);
+    if (ph) ph.classList.add('hidden');
+    if (err) err.classList.add('hidden');
+    doc.innerHTML = html;
     var emoji = sourceType && SOURCE_EMOJI[sourceType];
     if (emoji) {
-      var h1 = docEl.querySelector('h1');
+      var h1 = doc.querySelector('h1');
       if (h1) {
         var badge = document.createElement('span');
         badge.className = 'doc-source-badge' + (sourceType === 'cloud' ? ' doc-source-cloud' : '');
@@ -72,13 +400,18 @@
         h1.appendChild(badge);
       }
     }
-    renderMermaidBlocks(docEl);
-    docEl.classList.remove('hidden');
+    renderMermaidBlocks(doc);
+    doc.classList.remove('hidden');
+    updateToolbarVisibility();
   }
 
-  function showPythonCodePad(code, path, sourceType) {
-    placeholderEl.classList.add('hidden');
-    errorEl.classList.add('hidden');
+  function showPythonCodePad(code, path, sourceType, tab) {
+    var t = tab !== undefined ? tab : activeTab;
+    var ph = getPlaceholderEl(t);
+    var err = getErrorEl(t);
+    var doc = getDocEl(t);
+    if (ph) ph.classList.add('hidden');
+    if (err) err.classList.add('hidden');
     var theme = getCodeTheme();
     var fontSize = getCodeFontSize();
     var fontFamily = getCodeFontFamily();
@@ -111,18 +444,19 @@
         '<pre class="line-numbers"><code class="language-python">' + escapeHtml(code) + '</code></pre>' +
       '</div>' +
       '</div>';
-    docEl.innerHTML = html;
-    var codeEl = docEl.querySelector('.doc-code-pad code');
+    doc.innerHTML = html;
+    var codeEl = doc.querySelector('.doc-code-pad code');
     if (typeof Prism !== 'undefined' && codeEl) {
       Prism.highlightElement(codeEl);
     }
-    var themeSelect = docEl.querySelector('.doc-code-pad-theme');
+    var themeSelect = doc.querySelector('.doc-code-pad-theme');
     if (themeSelect) themeSelect.addEventListener('change', function () { setCodeTheme(themeSelect.value); });
-    var sizeSelect = docEl.querySelector('.doc-code-pad-font-size');
+    var sizeSelect = doc.querySelector('.doc-code-pad-font-size');
     if (sizeSelect) sizeSelect.addEventListener('change', function () { setCodeFontSize(sizeSelect.value); });
-    var familySelect = docEl.querySelector('.doc-code-pad-font-family');
+    var familySelect = doc.querySelector('.doc-code-pad-font-family');
     if (familySelect) familySelect.addEventListener('change', function () { setCodeFontFamily(familySelect.value); });
-    docEl.classList.remove('hidden');
+    doc.classList.remove('hidden');
+    updateToolbarVisibility();
   }
 
   var lastRepos = [];
@@ -226,7 +560,6 @@
       html += '<button type="button" class="btn-repo-collapse" title="Collapse/expand this repo" aria-expanded="' + (startCollapsed ? 'false' : 'true') + '"><span class="repo-btn-icon" aria-hidden="true">' + (startCollapsed ? '▶' : '▼') + '</span></button>';
       if (isVault) {
         html += '<span class="repo-name vault-name">' + escapeHtml(repo.name) + ' <span class="vault-icon" aria-hidden="true">🔐</span></span>';
-        html += '<button type="button" class="btn-repo-bookmark" id="btn-save-to-vault" title="Save current document to vault" aria-label="Save current document to vault"><span class="repo-btn-icon" aria-hidden="true">🔖</span></button>';
       } else {
         html += '<span class="repo-name">' + escapeHtml(repo.name) + '</span>';
       }
@@ -326,7 +659,8 @@
             var data = result.data || {};
             if (data.logs && data.logs.length && typeof appendConsoleLines === 'function') appendConsoleLines(data.logs);
             if (result.ok && data.ok) {
-              if (currentDoc && currentDoc.repo === name) showPlaceholder(true);
+              for (var t = 1; t <= 2; t++) { if (paneDocs[t] && paneDocs[t].repo === name) clearPane(t); }
+              afterPanesCleared();
               refreshTree();
             } else {
               var err = data.error || data.detail || 'Failed to remove source.';
@@ -358,7 +692,8 @@
             var data = result.data || {};
             if (data.logs && data.logs.length && typeof appendConsoleLines === 'function') appendConsoleLines(data.logs);
             if (result.ok && data.ok) {
-              if (currentDoc && currentDoc.repo === 'vault' && currentDoc.path === path) showPlaceholder(true);
+              for (var t = 1; t <= 2; t++) { if (paneDocs[t] && paneDocs[t].repo === 'vault' && paneDocs[t].path === path) clearPane(t); }
+              afterPanesCleared();
               refreshTree();
             } else {
               var err = data.error || data.detail || 'Failed to remove vault file.';
@@ -373,30 +708,6 @@
     });
     var dropZone = treeEl.querySelector('#vault-drop-zone');
     if (dropZone) setupVaultDropZone(dropZone);
-    var btnSaveToVault = treeEl.querySelector('#btn-save-to-vault');
-    if (btnSaveToVault) {
-      btnSaveToVault.addEventListener('click', function (e) {
-        e.stopPropagation();
-        if (!currentDoc) return;
-        beginExecution();
-        fetch('/api/vault/save-from-doc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repo: currentDoc.repo, path: currentDoc.path })
-        })
-          .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }).catch(function () { return { ok: false, data: {} }; }); })
-          .then(function (result) {
-            if (result.ok && result.data.saved && result.data.saved.length) {
-              if (typeof appendConsoleLine === 'function') appendConsoleLine('Saved to vault: ' + result.data.saved[0]);
-              refreshTree();
-            } else {
-              var err = (result.data && result.data.detail) ? result.data.detail : (result.data.error || 'Failed');
-              if (typeof appendConsoleLine === 'function') appendConsoleLine('Save to vault failed: ' + err);
-            }
-          })
-          .then(function () { endExecution(); });
-      });
-    }
   }
 
   function uploadFilesToVault(files) {
@@ -720,9 +1031,17 @@
     { value: 'dark-tomorrow', label: 'Tomorrow Night', dark: true },
     { value: 'dark-dracula', label: 'Dracula', dark: true },
     { value: 'dark-nord', label: 'Nord', dark: true },
+    { value: 'dark-onedark', label: 'One Dark', dark: true },
+    { value: 'dark-monokai', label: 'Monokai', dark: true },
+    { value: 'dark-solarized', label: 'Solarized Dark', dark: true },
+    { value: 'dark-gruvbox', label: 'Gruvbox Dark', dark: true },
+    { value: 'dark-catppuccin', label: 'Catppuccin Mocha', dark: true },
     { value: 'light-gh', label: 'GitHub', dark: false },
     { value: 'light-coy', label: 'Coy', dark: false },
-    { value: 'light-default', label: 'Default Light', dark: false }
+    { value: 'light-default', label: 'Default Light', dark: false },
+    { value: 'light-solarized', label: 'Solarized Light', dark: false },
+    { value: 'light-gruvbox', label: 'Gruvbox Light', dark: false },
+    { value: 'light-catppuccin', label: 'Catppuccin Latte', dark: false }
   ];
   function getCodeTheme() {
     try {
@@ -810,8 +1129,165 @@
     return getDocFromStorage() || getDocFromHash();
   }
 
+  var DOC_HISTORY_MAX = 10;
+  function getDocHistoryKey(tab) { return 'draft-doc-history-' + tab; }
+
+  function getDocHistory(tab) {
+    try {
+      var raw = localStorage.getItem(getDocHistoryKey(tab));
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.slice(0, DOC_HISTORY_MAX) : [];
+    } catch (e) { return []; }
+  }
+
+  function addToDocHistory(repo, path, tab) {
+    if (tab !== 1 && tab !== 2) return;
+    var list = getDocHistory(tab);
+    var key = repo + '\0' + path;
+    list = list.filter(function (item) { return (item.repo + '\0' + item.path) !== key; });
+    list.unshift({ repo: repo, path: path });
+    list = list.slice(0, DOC_HISTORY_MAX);
+    try { localStorage.setItem(getDocHistoryKey(tab), JSON.stringify(list)); } catch (e) {}
+  }
+
+  function docHistoryFilename(path) {
+    return (path || '').split('/').pop() || path || '';
+  }
+  function docHistoryLabel(item) {
+    return item.repo + ' / ' + docHistoryFilename(item.path);
+  }
+
+  function renderDocHistory(tab) {
+    var trigger = document.getElementById('doc-history-trigger-' + tab);
+    var dropdown = document.getElementById('doc-history-dropdown-' + tab);
+    if (!trigger || !dropdown) return;
+    var current = paneDocs[tab];
+    var list = getDocHistory(tab);
+    if (current) {
+      trigger.textContent = docHistoryFilename(current.path);
+      trigger.title = docHistoryLabel(current) + '. Click to show recent.';
+    } else {
+      trigger.textContent = list.length ? docHistoryFilename(list[0].path) : 'Recent';
+      trigger.title = list.length ? 'Last: ' + docHistoryLabel(list[0]) + '. Click to show queue.' : 'Recent documents in this tab';
+    }
+    dropdown.innerHTML = list.length === 0
+      ? '<div class="doc-history-empty">No recent documents.</div>'
+      : list.map(function (item) {
+          var filename = docHistoryFilename(item.path);
+          return '<button type="button" class="doc-history-item" role="menuitem" data-repo="' + escapeAttr(item.repo) + '" data-path="' + escapeAttr(item.path) + '" title="' + escapeAttr(item.repo + ' / ' + item.path) + '">' +
+            '<span class="doc-history-item-repo">' + escapeHtml(item.repo) + '</span>' +
+            '<span class="doc-history-item-path">' + escapeHtml(filename) + '</span></button>';
+        }).join('');
+    dropdown.querySelectorAll('.doc-history-item').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        loadDocIntoPane(tab, btn.dataset.repo, btn.dataset.path);
+        dropdown.classList.add('hidden');
+        trigger.setAttribute('aria-expanded', 'false');
+      });
+    });
+  }
+
+  function initPaneHistory(tab) {
+    var trigger = document.getElementById('doc-history-trigger-' + tab);
+    var dropdown = document.getElementById('doc-history-dropdown-' + tab);
+    var box = document.getElementById('doc-pane-history-' + tab);
+    if (!trigger || !dropdown || !box) return;
+    trigger.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var open = !dropdown.classList.toggle('hidden');
+      trigger.setAttribute('aria-expanded', open);
+      if (open) renderDocHistory(tab);
+    });
+    box.addEventListener('click', function (e) { e.stopPropagation(); });
+  }
+
+  (function initDocTabs() {
+    loadTabsLayout();
+    updateTabBarUI();
+    initPaneHistory(1);
+    initPaneHistory(2);
+    renderDocHistory(1);
+    renderDocHistory(2);
+    document.addEventListener('click', function () {
+      [1, 2].forEach(function (t) {
+        var d = document.getElementById('doc-history-dropdown-' + t);
+        var tr = document.getElementById('doc-history-trigger-' + t);
+        if (d && !d.classList.contains('hidden')) { d.classList.add('hidden'); if (tr) tr.setAttribute('aria-expanded', 'false'); }
+      });
+    });
+
+    function switchToTab(tabNum) {
+      if (tabNum !== 1 && tabNum !== 2) return;
+      activeTab = tabNum;
+      currentDoc = paneDocs[tabNum] || null;
+      if (currentDoc) setDocHash(currentDoc.repo, currentDoc.path); else clearDocHash();
+      updateTabBarUI();
+      savePanesState();
+    }
+    document.querySelectorAll('.doc-pane-label').forEach(function (label) {
+      label.addEventListener('click', function (e) {
+        e.preventDefault();
+        var pane = this.closest('.doc-pane');
+        if (!pane) return;
+        var tab = parseInt(pane.getAttribute('data-pane'), 10);
+        switchToTab(tab);
+      });
+    });
+
+    document.getElementById('doc-layout-stacked') && document.getElementById('doc-layout-stacked').addEventListener('click', function () {
+      layoutMode = 'stacked';
+      saveTabsLayout();
+      updateTabBarUI();
+    });
+    document.getElementById('doc-layout-side') && document.getElementById('doc-layout-side').addEventListener('click', function () {
+      layoutMode = 'side-by-side';
+      saveTabsLayout();
+      updateTabBarUI();
+    });
+
+    document.getElementById('doc-swap-btn') && document.getElementById('doc-swap-btn').addEventListener('click', function () {
+      sideBySideSwapped = !sideBySideSwapped;
+      saveTabsLayout();
+      updateTabBarUI();
+    });
+    document.querySelectorAll('.doc-tab-num').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tab = parseInt(btn.getAttribute('data-tab'), 10);
+        if (tab === 1 || tab === 2) switchToTab(tab);
+      });
+    });
+    document.querySelectorAll('.doc-pane-save-vault').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var tab = parseInt(btn.getAttribute('data-pane'), 10);
+        var doc = paneDocs[tab];
+        if (!doc) return;
+        beginExecution();
+        fetch('/api/vault/save-from-doc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo: doc.repo, path: doc.path })
+        })
+          .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }).catch(function () { return { ok: false, data: {} }; }); })
+          .then(function (result) {
+            if (result.ok && result.data.saved && result.data.saved.length) {
+              if (typeof appendConsoleLine === 'function') appendConsoleLine('Saved to vault: ' + result.data.saved[0]);
+              refreshTree();
+            } else {
+              var err = (result.data && result.data.detail) ? result.data.detail : (result.data.error || 'Failed');
+              if (typeof appendConsoleLine === 'function') appendConsoleLine('Save to vault failed: ' + err);
+            }
+          })
+          .then(function () { endExecution(); });
+      });
+    });
+  })();
+
   function loadDoc(repo, path, sourceType) {
     currentDoc = { repo: repo, path: path };
+    paneDocs[activeTab] = { repo: repo, path: path };
     setDocHash(repo, path);
     if (sourceType === undefined) sourceType = repoSourceTypeMap[repo] || 'local';
     var url = '/api/doc/' + encodeURIComponent(repo) + '/' + path.split('/').map(encodeURIComponent).join('/');
@@ -842,25 +1318,52 @@
             showDoc('<pre>' + escapeHtml(text) + '</pre>', sourceType);
           }
         }
+        addToDocHistory(repo, path, activeTab);
+        renderDocHistory(activeTab);
+        savePanesState();
       })
       .catch(function (err) {
         showError(err.message || 'Failed to load document.');
       });
   }
 
-  function restoreCurrentDoc() {
-    var doc = getCurrentDocToRestore();
-    if (doc) loadDoc(doc.repo, doc.path);
+  function restorePanes() {
+    try {
+      var raw1 = localStorage.getItem(PANE_1_KEY);
+      var raw2 = localStorage.getItem(PANE_2_KEY);
+      var rawActive = localStorage.getItem(ACTIVE_TAB_KEY);
+      if (raw1) paneDocs[1] = JSON.parse(raw1);
+      else paneDocs[1] = null;
+      if (raw2) paneDocs[2] = JSON.parse(raw2);
+      else paneDocs[2] = null;
+      activeTab = (rawActive === '2' ? 2 : 1);
+      var currentDocFromUrlOrStorage = getDocFromHash() || getDocFromStorage();
+      if (currentDocFromUrlOrStorage) paneDocs[activeTab] = { repo: currentDocFromUrlOrStorage.repo, path: currentDocFromUrlOrStorage.path };
+    } catch (e) {}
+    var promises = [];
+    if (paneDocs[1]) promises.push(loadDocIntoPane(1, paneDocs[1].repo, paneDocs[1].path));
+    if (paneDocs[2]) promises.push(loadDocIntoPane(2, paneDocs[2].repo, paneDocs[2].path));
+    if (promises.length === 0) {
+      var fallback = getCurrentDocToRestore();
+      if (fallback) promises.push(loadDocIntoPane(activeTab, fallback.repo, fallback.path));
+    }
+    Promise.all(promises).then(function () {
+      currentDoc = paneDocs[activeTab] || null;
+      if (currentDoc) setDocHash(currentDoc.repo, currentDoc.path);
+      else clearDocHash();
+      updateTabBarUI();
+      updateToolbarVisibility();
+      renderDocHistory(1);
+      renderDocHistory(2);
+      savePanesState();
+    });
   }
-
-  restoreCurrentDoc();
 
   fetch('/api/tree')
     .then(function (r) { return r.json(); })
     .then(function (data) {
       renderTree(data.repos || []);
-      var doc = getCurrentDocToRestore();
-      if (doc && (!currentDoc || currentDoc.repo !== doc.repo || currentDoc.path !== doc.path)) loadDoc(doc.repo, doc.path);
+      restorePanes();
     })
     .catch(function () {
       treeEl.innerHTML = '<p class="error">Failed to load tree.</p>';
@@ -872,8 +1375,22 @@
     else if (!getDocFromHash() && currentDoc) showPlaceholder(false);
   });
 
-  document.getElementById('btn-home').addEventListener('click', function () {
-    showPlaceholder(true);
+  var SIDEBAR_COLLAPSED_KEY = 'draft-sidebar-collapsed';
+  var layoutEl = document.getElementById('layout');
+  function getSidebarCollapsed() {
+    try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'; } catch (e) { return false; }
+  }
+  function setSidebarCollapsed(collapsed) {
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
+    if (layoutEl) layoutEl.classList.toggle('sidebar-collapsed', !!collapsed);
+    var btn = document.getElementById('btn-sidebar-toggle');
+    if (btn) btn.setAttribute('aria-checked', collapsed ? 'false' : 'true');
+  }
+  if (layoutEl) layoutEl.classList.toggle('sidebar-collapsed', getSidebarCollapsed());
+  var sidebarToggleBtn = document.getElementById('btn-sidebar-toggle');
+  if (sidebarToggleBtn) sidebarToggleBtn.setAttribute('aria-checked', getSidebarCollapsed() ? 'false' : 'true');
+  document.getElementById('btn-sidebar-toggle') && document.getElementById('btn-sidebar-toggle').addEventListener('click', function () {
+    setSidebarCollapsed(!getSidebarCollapsed());
   });
 
   document.getElementById('btn-collapse').addEventListener('click', collapseAll);
@@ -1197,5 +1714,5 @@
     });
   }
 
-  if (!currentDoc) showPlaceholder(false);
+  /* Do not call showPlaceholder here: it runs before restorePanes() and would wipe saved pane state in localStorage. */
 })();
