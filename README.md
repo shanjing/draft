@@ -4,7 +4,7 @@ Draft is a personal documentation hub. It pulls document files from your other r
 
 No cloud sync. Your docs stay local. Draft works with or without an LLM — Ollama for fully offline use, or Claude, OpenAI, and Gemini.
 
-Draft is alo an MCP server. [TODO] 
+Draft is also an MCP server. [TODO] 
 
 ## Get started (quickest way)
 
