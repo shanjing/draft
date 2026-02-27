@@ -72,7 +72,11 @@ Design docs are in **`docs/`**:
 - [Local oracle design](docs/local-oracle-design.md) — when a local LLM is required
 - [Testing suite](docs/testing-suites.md) — test layers and commands
 
+<img width="2037" height="1147" alt="Screenshot 2026-02-27 at 9 36 12 AM" src="https://github.com/user-attachments/assets/28a26c52-cc49-4421-8fd1-20ef0638daf0" />
+
+<img width="1925" height="1043" alt="Screenshot 2026-02-27 at 9 39 10 AM" src="https://github.com/user-attachments/assets/4b0a7aad-e733-4c0d-a40c-68e1d5a23b1c" />
+
 <img width="1707" height="1027" alt="Screenshot 2026-02-26 at 10 59 40 PM" src="https://github.com/user-attachments/assets/82c5d7b9-17a9-453a-8c53-412162d117bf" />
 
-<img width="1305" height="1024" alt="Screenshot 2026-02-26 at 11 11 13 AM" src="https://github.com/user-attachments/assets/eb2f9a98-7ab1-4a91-a0c1-81691ef82e4e" />
+
 
