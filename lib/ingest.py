@@ -18,10 +18,17 @@ import os
 import warnings
 from pathlib import Path
 
+# Prefer offline: no Hugging Face network use unless explicitly enabled
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 from lib.chunking import chunk_markdown, chunk_python, Chunk
 from lib.gitignore import get_git_ignored_set
+from lib.log import get_logger
 from lib.manifest import parse_sources_yaml
+from lib.ollama_embed import embed as ollama_embed, is_ollama_embed_model as _is_ollama_embed_model
 from lib.paths import get_effective_repo_root, get_sources_yaml_path, get_vault_root
+
+log = get_logger(__name__)
 
 # Same exclusions as pull.py (do not depend on scripts)
 EXCLUDE_TOPLEVEL = {"README.md"}
@@ -250,7 +257,18 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     mode = (profile or "quick").strip().lower()
     if mode not in INDEX_PROFILES:
         raise ValueError(f"Unknown index profile: {profile}. Use quick or deep.")
-    cfg = INDEX_PROFILES[mode]
+    cfg = dict(INDEX_PROFILES[mode])
+    # Env override for embedding model (set by setup.sh)
+    env_embed = os.environ.get("DRAFT_EMBED_MODEL", "").strip()
+    embed_provider = os.environ.get("DRAFT_EMBED_PROVIDER", "").strip().lower()
+    if env_embed:
+        cfg["embed_model"] = env_embed
+        cfg["trust_remote_code"] = "nomic" in env_embed.lower() or "qwen" in env_embed.lower()
+    use_ollama_embed = embed_provider == "ollama" or (
+        env_embed and _is_ollama_embed_model(env_embed)
+    )
+    if use_ollama_embed:
+        cfg["embed_provider"] = "ollama"
 
     chunks = collect_chunks(
         draft_root,
@@ -259,7 +277,7 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     )
     if not chunks:
         if verbose:
-            print("No chunks to index (docs + code).")
+            log.info("No chunks to index (docs + code).")
         return 0
 
     persist_dir = draft_root / VECTOR_DIR
@@ -274,12 +292,14 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
         client.delete_collection(COLLECTION_NAME)
     except Exception:
         pass
+    embed_provider = cfg.get("embed_provider", "")
     collection = client.create_collection(
         COLLECTION_NAME,
         metadata={
             "description": "Draft docs for RAG",
             "profile": mode,
             "embed_model": str(cfg["embed_model"]),
+            "embed_provider": embed_provider,
             "trust_remote_code": bool(cfg["trust_remote_code"]),
             "chunk_max_chars": int(cfg["chunk_max_chars"]),
             "chunk_overlap_paras": int(cfg["chunk_overlap_paras"]),
@@ -287,14 +307,7 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     )
 
     if verbose:
-        print(f"Embedding {len(chunks)} chunks with {cfg['embed_model']} ({mode})...")
-    # Some remote-code models print noisy non-critical stdout; suppress that while loading.
-    with contextlib.redirect_stdout(io.StringIO()):
-        model = SentenceTransformer(
-            str(cfg["embed_model"]),
-            trust_remote_code=bool(cfg["trust_remote_code"]),
-        )
-    # Stream in small batches to keep memory bounded and avoid large Arrow/DuckDB buffers.
+        log.info(f"Embedding {len(chunks)} chunks with {cfg['embed_model']} ({mode})...")
     BATCH_SIZE = int(cfg["batch_size"])
     EMBED_BATCH_SIZE = int(cfg["embed_batch_size"])
     starts = range(0, len(chunks), BATCH_SIZE)
@@ -302,41 +315,79 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     if tqdm is not None:
         pbar = tqdm(total=len(chunks), desc="Build RAG/vector index", unit="chunk", leave=True)
 
-    for start in starts:
-        end = min(start + BATCH_SIZE, len(chunks))
-        batch = chunks[start:end]
-        texts = [c.text for c in batch]
-        embeddings = model.encode(
-            texts,
-            batch_size=EMBED_BATCH_SIZE,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-        )
-        ids = [f"chunk_{i}" for i in range(start, end)]
-        metadatas = []
-        for c in batch:
-            meta: dict = {
-                "repo": c.repo,
-                "path": c.path,
-                "heading": (c.heading[:200] if c.heading else ""),
-            }
-            if c.start_line is not None and c.end_line is not None:
-                meta["start_line"] = c.start_line
-                meta["end_line"] = c.end_line
-            metadatas.append(meta)
-        collection.add(
-            ids=ids,
-            embeddings=embeddings.tolist(),
-            metadatas=metadatas,
-            documents=texts,
-        )
-        if pbar is not None:
-            pbar.update(len(batch))
-        elif verbose:
-            print(f"  Added {end}/{len(chunks)} chunks...")
+    if use_ollama_embed:
+        # Use Ollama API (no download); model already in Ollama
+        ollama_model = str(cfg["embed_model"])
+        if verbose:
+            log.info(f"Using Ollama embed: {ollama_model}")
+        for start in starts:
+            end = min(start + BATCH_SIZE, len(chunks))
+            batch = chunks[start:end]
+            texts = [c.text for c in batch]
+            embeddings = ollama_embed(ollama_model, texts, batch_size=EMBED_BATCH_SIZE)
+            emb_list = [e if isinstance(e, list) else e.tolist() for e in embeddings]
+            ids = [f"chunk_{i}" for i in range(start, end)]
+            metadatas = []
+            for c in batch:
+                meta: dict = {
+                    "repo": c.repo,
+                    "path": c.path,
+                    "heading": (c.heading[:200] if c.heading else ""),
+                }
+                if c.start_line is not None and c.end_line is not None:
+                    meta["start_line"] = c.start_line
+                    meta["end_line"] = c.end_line
+                metadatas.append(meta)
+            collection.add(ids=ids, embeddings=emb_list, metadatas=metadatas, documents=texts)
+            if pbar is not None:
+                pbar.update(len(batch))
+            elif verbose:
+                log.info(f"  Added {end}/{len(chunks)} chunks...")
+    else:
+        # Use sentence-transformers (downloads from Hugging Face)
+        with contextlib.redirect_stdout(io.StringIO()):
+            model = SentenceTransformer(
+                str(cfg["embed_model"]),
+                trust_remote_code=bool(cfg["trust_remote_code"]),
+            )
+        emb_dim = model.get_sentence_embedding_dimension()
+        if verbose:
+            log.info(f"Embedding dimension: {emb_dim} ({cfg['embed_model']})")
+        for start in starts:
+            end = min(start + BATCH_SIZE, len(chunks))
+            batch = chunks[start:end]
+            texts = [c.text for c in batch]
+            embeddings = model.encode(
+                texts,
+                batch_size=EMBED_BATCH_SIZE,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            )
+            ids = [f"chunk_{i}" for i in range(start, end)]
+            metadatas = []
+            for c in batch:
+                meta: dict = {
+                    "repo": c.repo,
+                    "path": c.path,
+                    "heading": (c.heading[:200] if c.heading else ""),
+                }
+                if c.start_line is not None and c.end_line is not None:
+                    meta["start_line"] = c.start_line
+                    meta["end_line"] = c.end_line
+                metadatas.append(meta)
+            collection.add(
+                ids=ids,
+                embeddings=embeddings.tolist(),
+                metadatas=metadatas,
+                documents=texts,
+            )
+            if pbar is not None:
+                pbar.update(len(batch))
+            elif verbose:
+                log.info(f"  Added {end}/{len(chunks)} chunks...")
     if pbar is not None:
         pbar.close()
 
     if verbose:
-        print(f"Indexed {len(chunks)} chunks into {persist_dir}")
+        log.info(f"Indexed {len(chunks)} chunks into {persist_dir}")
     return len(chunks)

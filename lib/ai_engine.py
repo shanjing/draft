@@ -18,10 +18,12 @@ import os
 from pathlib import Path
 
 from lib.ingest import VECTOR_DIR, COLLECTION_NAME, EMBED_MODEL, TRUST_REMOTE_CODE  # noqa: F401
+from lib.log import get_logger
 from lib.manifest import parse_sources_yaml
 from lib.paths import get_effective_repo_root, get_sources_yaml_path, get_vault_root
 from lib.prompts import SYSTEM_PROMPT
 
+log = get_logger(__name__)
 _EMBED_MODEL_CACHE: dict[tuple[str, bool], object] = {}
 
 
@@ -69,8 +71,18 @@ def llm_ready(draft_root: Path) -> bool:
     return False
 
 
-# The default top_k for the semantic search, revisit this later for a dynamic setting
-TOP_K = 5
+# Vector search returns top RETRIEVAL_TOP_K; cross-encoder reranks to RERANK_TOP_N for LLM.
+RETRIEVAL_TOP_K = 10
+RERANK_TOP_N = 3
+CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+
+def _get_cross_encoder_model() -> str:
+    """Cross-encoder model name; DRAFT_CROSS_ENCODER_MODEL env overrides default."""
+    return os.environ.get("DRAFT_CROSS_ENCODER_MODEL", "").strip() or CROSS_ENCODER_MODEL
+
+_CROSS_ENCODER_CACHE: dict[str, object] = {}
+
 
 def _coerce_bool(v, default: bool) -> bool:
     if isinstance(v, bool):
@@ -119,7 +131,62 @@ def _get_collection(draft_root: Path):
         return None
 
 
-def retrieve(draft_root: Path, query: str, top_k: int = TOP_K) -> list[dict]:
+def _get_cross_encoder(model_name: str | None = None):
+    """Load and cache CrossEncoder for reranking. Uses HF_HOME if set (e.g. by ingest)."""
+    name = model_name or _get_cross_encoder_model()
+    if name not in _CROSS_ENCODER_CACHE:
+        from sentence_transformers import CrossEncoder
+        _CROSS_ENCODER_CACHE[name] = CrossEncoder(name)
+    return _CROSS_ENCODER_CACHE[name]
+
+
+def rerank(query: str, chunks: list[dict], top_n: int = RERANK_TOP_N) -> list[dict]:
+    """
+    Rerank chunks using cross-encoder or Ollama. Returns top_n chunks with "score" attached.
+    """
+    if not chunks:
+        return []
+    rerank_provider = (os.environ.get("DRAFT_RERANK_PROVIDER") or "").strip().lower()
+    model_name = _get_cross_encoder_model()
+    if rerank_provider == "ollama":
+        try:
+            from lib.ollama_embed import rerank as ollama_rerank
+            docs = [c.get("text", "") or "" for c in chunks]
+            results = ollama_rerank(model_name, query, docs, top_n=top_n)
+            text_to_chunk = {c.get("text", "") or "": c for c in chunks}
+            out = []
+            for doc, score in results:
+                c = text_to_chunk.get(doc)
+                if c is not None:
+                    item = dict(c)
+                    item["score"] = round(float(score), 4)
+                    out.append(item)
+            return out
+        except Exception as e:
+            log.warning(f"Ollama rerank failed ({e}), skipping rerank (no HF fallback)")
+            # Return top_n chunks in order, with placeholder score; avoids HF download
+            out = []
+            for i, c in enumerate(chunks[:top_n]):
+                item = dict(c)
+                item["score"] = 1.0 - (i * 0.001)
+                out.append(item)
+            return out
+    # HF CrossEncoder: strip Ollama :tag from model name (e.g. dengcao/Qwen3-Reranker-0.6B:Q8_0 -> dengcao/Qwen3-Reranker-0.6B)
+    hf_model = model_name.split(":")[0] if ":" in model_name else model_name
+    model = _get_cross_encoder(hf_model)
+    pairs = [(query, c.get("text", "") or "") for c in chunks]
+    scores = model.predict(pairs)
+    indexed = list(zip(scores.tolist(), chunks))
+    indexed.sort(key=lambda x: x[0], reverse=True)
+    out = []
+    for score, c in indexed[:top_n]:
+        item = dict(c)
+        item["score"] = round(float(score), 4)
+        out.append(item)
+    return out
+
+
+def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list[dict]:
     """
     Semantic search over the vector store. Returns list of
     {"repo", "path", "heading", "text"} for the top-k chunks.
@@ -129,7 +196,18 @@ def retrieve(draft_root: Path, query: str, top_k: int = TOP_K) -> list[dict]:
         return []
     meta = (getattr(coll, "metadata", None) or {})
     embed_model = meta.get("embed_model") or EMBED_MODEL
+    embed_provider = (meta.get("embed_provider") or "").strip().lower()
     trust_remote_code = _coerce_bool(meta.get("trust_remote_code"), TRUST_REMOTE_CODE)
+
+    def _query_with_ollama(model_name: str):
+        from lib.ollama_embed import embed as ollama_embed
+        embs = ollama_embed(model_name, [query], batch_size=1)
+        q_emb = embs[0] if embs else []
+        return coll.query(
+            query_embeddings=[q_emb],
+            n_results=min(top_k, 20),
+            include=["metadatas", "documents"],
+        )
 
     def _query_with(model_name: str, trust: bool):
         model = _get_embedding_model(model_name, trust)
@@ -141,7 +219,10 @@ def retrieve(draft_root: Path, query: str, top_k: int = TOP_K) -> list[dict]:
         )
 
     try:
-        result = _query_with(embed_model, trust_remote_code)
+        if embed_provider == "ollama":
+            result = _query_with_ollama(embed_model)
+        else:
+            result = _query_with(embed_model, trust_remote_code)
     except Exception as e:
         msg = str(e)
         # Backward-compat: old collections may be quick-built but missing metadata.
@@ -181,7 +262,7 @@ def _build_context(chunks: list[dict]) -> str:
 
 
 def _build_citations(draft_root: Path, chunks: list[dict]) -> list[dict]:
-    """Build citation dicts with optional start_line, end_line, snippet for code chunks."""
+    """Build citation dicts with optional start_line, end_line, snippet, score."""
     repos_config: dict = {}
     sources_yaml = get_sources_yaml_path()
     if sources_yaml.is_file():
@@ -194,6 +275,8 @@ def _build_citations(draft_root: Path, chunks: list[dict]) -> list[dict]:
             "path": c.get("path", ""),
             "heading": c.get("heading") or "",
         }
+        if "score" in c:
+            cit["score"] = c["score"]
         start_line = c.get("start_line")
         end_line = c.get("end_line")
         if start_line is not None and end_line is not None and isinstance(start_line, int) and isinstance(end_line, int):
@@ -220,22 +303,41 @@ def _build_citations(draft_root: Path, chunks: list[dict]) -> list[dict]:
         citations.append(cit)
     return citations
 
+#the entry point for RAG retrieval and LLM processing
+def ask_stream(draft_root: Path, query: str, *, debug: bool = False):
+    """
+    Retrieve top-k chunks, rerank with cross-encoder to top-n, call LLM, stream response.
+    Yields: ("models", dict), ("text", str), ("citations", list), ("error", str).
+    When debug=True, logs embed_model, cross_encoder_model, retrieval count, and rerank scores.
+    """
+    # Use same HF cache as ingest for cross-encoder
+    hf_cache = draft_root / ".cache" / "huggingface"
+    hf_cache.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("HF_HOME", str(hf_cache))
 
-def ask_stream(draft_root: Path, query: str):
-    """
-    Retrieve top-k chunks, call LLM with strict context-only prompt, stream response.
-    Yields: ("text", str) for each delta, ("citations", list), ("error", str).
-    """
-    chunks = retrieve(draft_root, query, top_k=TOP_K)
+    coll = _get_collection(draft_root)
+    meta = (getattr(coll, "metadata", None) or {}) if coll else {}
+    embed_model = meta.get("embed_model") or EMBED_MODEL
+
+    chunks = retrieve(draft_root, query, top_k=RETRIEVAL_TOP_K)
+    if debug:
+        log.info(f"embed_model: {embed_model}")
+        log.info(f"cross_encoder_model: {_get_cross_encoder_model()}")
+        log.info(f"retrieval: {len(chunks)} chunks (top_k={RETRIEVAL_TOP_K})")
+
+    chunks = rerank(query, chunks, top_n=RERANK_TOP_N)
+    #log the rerank scores for debugging
+    if debug and chunks:
+        for i, c in enumerate(chunks, 1):
+            score = c.get("score", "?")
+            label = f"{c.get('repo', '')}/{c.get('path', '')}"
+            if c.get("heading"):
+                label += f" — {c.get('heading', '')}"
+            log.info(f"rerank #{i} score={score} {label}")
+
     citations = _build_citations(draft_root, chunks)
 
-    if not chunks:
-        yield ("error", "No indexed documents. Run 'python scripts/index_for_ai.py' to build the AI index.")
-        return
-
-    context = _build_context(chunks)
-    user_content = f"Context from documentation:\n\n{context}\n\n---\n\nQuestion: {query}"
-
+    # Compute LLM model for display (before early return)
     _ensure_env_loaded(draft_root)
     provider = _env_strip("DRAFT_LLM_PROVIDER", "").lower()
     model_override = _env_strip("DRAFT_LLM_MODEL") or None
@@ -243,15 +345,33 @@ def ask_stream(draft_root: Path, query: str):
     local_model = _env_strip("LOCAL_AI_MODEL")
     if local_model and local_model.startswith("ollama_chat/"):
         local_model = local_model.replace("ollama_chat/", "", 1)
-
-    # The following borrows from project MarginCall to set the LLM provider and model
-    # CLOUD_AI_MODEL set → cloud (Gemini); LOCAL_AI_MODEL or OLLAMA_MODEL → local
     if not provider and cloud_model:
         provider = "gemini"
     if not provider and (local_model or _env_strip("OLLAMA_MODEL")):
         provider = "ollama"
-
     ollama_model = _env_strip("OLLAMA_MODEL") or local_model or "qwen3:8b"
+    if provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
+        llm_model = model_override or "claude-3-5-sonnet-20241022"
+    elif provider == "gemini":
+        llm_model = (model_override or cloud_model or "gemini-2.5-flash").strip()
+    elif provider == "openai":
+        llm_model = model_override or "gpt-4o-mini"
+    else:
+        llm_model = ollama_model
+
+    # Emit model info after retrieval+rerank, before streaming
+    yield ("models", {
+        "embed_model": embed_model,
+        "cross_encoder_model": _get_cross_encoder_model(),
+        "llm_model": llm_model,
+    })
+
+    if not chunks:
+        yield ("error", "No indexed documents. Run 'python scripts/index_for_ai.py' to build the AI index.")
+        return
+
+    context = _build_context(chunks)
+    user_content = f"Context from documentation:\n\n{context}\n\n---\n\nQuestion: {query}"
 
     if provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
         api_key = _env_strip("ANTHROPIC_API_KEY")

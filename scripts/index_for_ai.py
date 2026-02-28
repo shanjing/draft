@@ -24,7 +24,16 @@ os.environ.setdefault("HF_HOME", str(_cache))
 # Ensure lib is importable
 sys.path.insert(0, str(DRAFT_ROOT))
 
-from lib.ingest import build_index
+# Load .env for DRAFT_EMBED_MODEL override
+try:
+    from dotenv import load_dotenv
+    load_dotenv(DRAFT_ROOT / ".env")
+except ImportError:
+    pass
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
+from lib.ingest import build_index, INDEX_PROFILES
+from lib.log import configure_cli
 
 
 @click.command(help="Rebuild Draft RAG index.")
@@ -36,6 +45,11 @@ from lib.ingest import build_index
 )
 @click.option("-v", "--verbose", is_flag=True, help="Verbose progress output.")
 def main(profile: str, verbose: bool) -> None:
+    mode = (profile or "quick").strip().lower()
+    cfg = INDEX_PROFILES.get(mode, INDEX_PROFILES["quick"])
+    if verbose:
+        configure_cli()
+        click.echo(f"embed_model: {cfg['embed_model']}")
     n = build_index(DRAFT_ROOT, verbose=verbose, profile=profile)
     click.echo(f"Indexed {n} chunks.")
 

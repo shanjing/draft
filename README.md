@@ -12,11 +12,25 @@ Draft is also an MCP server. [TODO]
 ./setup.sh
 ```
 
-## Start it manually
+See [Using setup.sh](#using-setupsh) below for what the script does and how to use it.
+
+## Start the UI
+
+**Option A — daemon (recommended):** starts the server in the background and opens the app in your browser.
+
+```bash
+./start.sh          # default port 8058
+./start.sh 8059     # custom port
+```
+
+If port 8058 is already in use, `start.sh` will ask whether to restart (kill the existing process and start again). Logs go to `~/.draft/.draft-ui.log` (or `$DRAFT_HOME/.draft-ui.log`).
+
+**Option B — foreground:** run the server in the terminal (stops when you Ctrl+C).
 
 ```bash
 source .venv/bin/activate
 python scripts/serve.py   # UI at http://localhost:8058
+python scripts/serve.py -p 8059   # custom port
 ```
 
 ## Run Draft as a local Docker container
@@ -63,14 +77,48 @@ No LLM is needed for the rest of Draft — tree, search, pull, add source. See *
 
 The **vault** lives at **`~/.draft/vault/`** (or **`$DRAFT_HOME/vault/`**). It is separate from **`.doc_sources/`** so it can later be pointed at encrypted S3, iCloud, etc. File encryption is TODO.
 
-## Engineering
+## Privacy
 
-Design docs are in **`docs/`**:
+Draft is built so you can run **everything locally** and keep your docs and queries off the network when you want.
 
-- [Storage & metadata design](docs/storage-and-metadata-design.md) — access layer, vault, sources.yaml, reconnection
-- [Intelligence layer design](docs/intelligence-layer-design.md) — embeddings, Chroma, LLM, RAG
-- [Local oracle design](docs/local-oracle-design.md) — when a local LLM is required
-- [Testing suite](docs/testing-suites.md) — test layers and commands
+- **Hugging Face offline:** Draft sets **`HF_HUB_OFFLINE=1`** in **`.env`** (and uses it by default in code). Hugging Face models (embeddings, cross-encoder) then use only already-downloaded or local assets — no outbound calls to Hugging Face Hub. Setup and the app ensure this is set so RAG stays local.
+- **Local LLM:** When resources allow, use **Ollama** with a local model (e.g. Qwen3 embed + reranker). **`./setup.sh`** can configure an all-local stack (embed + rerank + chat via Ollama). No doc content or queries are sent to the internet.
+- **Optional cloud:** You can still choose a cloud LLM (Claude, Gemini, OpenAI) in setup; only then are prompts and answers sent to the provider you configured.
+
+For maximum privacy, use **Ollama** and keep **`HF_HUB_OFFLINE=1`** in **`.env`** so indexing and Ask (AI) run fully on your machine.
+
+## Using setup.sh
+
+**`./setup.sh`** is the main one-time (or re-run) setup script. It:
+
+1. **Creates the environment** — ensures `.venv` exists and installs dependencies from `requirements.txt`. Uses Python 3.11 or 3.12 when available (ChromaDB/sentence-transformers need it for Ask (AI)). Use **`./setup.sh --recreate`** to rebuild the venv (e.g. after switching Python version).
+
+2. **Ensures `~/.draft/sources.yaml`** — copies from `sources.example.yaml` if missing. This file is your list of document sources (local paths or GitHub URLs).
+
+3. **Walks you through adding sources** — you can add a local path or a GitHub repo URL. The script runs `pull.py -a` under the hood.
+
+4. **Configures the LLM for Ask (AI)** — if Ollama is installed, it can suggest the Qwen3 model set (embed + reranker) and offer presets: **G** (Gold: 8b embed + 0.6B reranker), **L** (8B+8B), **S** (0.6B+0.6B). Otherwise you can choose a cloud provider (Claude, Gemini, OpenAI) and enter an API key. Choices are written to **`.env`** in the repo root.
+
+5. **Builds the RAG index** — after setup, it runs the AI index build once so Ask (AI) works immediately.
+
+You can re-run **`./setup.sh`** anytime to add more sources or change the LLM. To tweak config by hand, edit **`.env`** (embed model, cross-encoder, LLM provider, API keys). See **`docs/RAG_operations.md`** for CLI commands (index build, ask, pipeline test).
+
+---
+
+## References — docs for engineering and design
+
+The **`docs/`** folder contains design and operations docs you can use as reference:
+
+| Doc | Purpose |
+|-----|--------|
+| [Storage & metadata design](docs/storage-and-metadata-design.md) | Access layer, vault, `sources.yaml`, manifest, reconnection |
+| [Core implementations](docs/core-implementations.md) | Source type taxonomy, storage layout under `DRAFT_HOME`, manifest |
+| [Design principles](docs/design-principles.md) | Data sources and operations (github, local_dir, local_git, vault, etc.) |
+| [Intelligence layer design](docs/intelligence-layer-design.md) | Embeddings, Chroma, LLM integration, RAG pipeline |
+| [RAG design principles](docs/RAG-design-principles.md) | RAG goals, architecture, chunking, citations, local vs cloud |
+| [RAG operations](docs/RAG_operations.md) | Default models, Qwen3 pairs (G/L/S), CLI: index build, ask, pipeline test |
+| [Local oracle design](docs/local-oracle-design.md) | When and how a local LLM is used for Ask (AI) |
+| [Testing suites](docs/testing-suites.md) | Test layers, pytest, pipeline test (`test_pipeline.py`), curl integration |
 
 <img width="2037" height="1147" alt="Screenshot 2026-02-27 at 9 36 12 AM" src="https://github.com/user-attachments/assets/28a26c52-cc49-4421-8fd1-20ef0638daf0" />
 

@@ -109,3 +109,22 @@ class TestAIEngine:
         assert isinstance(out, list)
         # May have 0 or more depending on embedding
         assert all("repo" in c and "path" in c for c in out)
+
+    def test_ask_stream_yields_events_no_index(self, temp_draft_root):
+        """When no index exists, ask_stream yields models and error."""
+        from lib.ai_engine import ask_stream
+        events = list(ask_stream(temp_draft_root, "test query"))
+        types = [e[0] for e in events]
+        assert "models" in types
+        assert "error" in types
+        error_payload = next((e[1] for e in events if e[0] == "error"), None)
+        assert error_payload is not None
+        assert "indexed" in error_payload.lower() or "index" in error_payload.lower()
+
+    def test_ask_stream_debug_mode_no_crash(self, temp_draft_root):
+        """ask_stream with debug=True runs without exception."""
+        from lib.ai_engine import ask_stream
+        events = list(ask_stream(temp_draft_root, "test query", debug=True))
+        assert len(events) >= 1
+        types = [e[0] for e in events]
+        assert "models" in types

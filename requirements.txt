@@ -1,18 +1,26 @@
 # Python 3.11 or 3.12 recommended. Python 3.14+ is not supported by chromadb (Pydantic v1).
 # NumPy must be <2 for PyTorch/sentence-transformers/Chroma binary compatibility.
 numpy>=1.24,<2
+
+# Utilities
+tqdm>=4.66.0
+einops>=0.7.0
+pytest>=7.0.0
+python-multipart>=0.0.22
 python-dotenv>=1.0.0
 click>=8.0
 fastapi>=0.100
-python-multipart>=0.0.6
 uvicorn[standard]>=0.22
+
+# RAG
 whoosh>=2.7
 chromadb>=0.4.22,<0.6
-sentence-transformers>=2.2.0
-tqdm>=4.66.0
-einops>=0.7.0
+sentence-transformers>=4.37.0
+# Qwen3 embed/reranker models require transformers>=4.51 (qwen3 architecture)
+transformers>=4.51.0
+tokenizers>=0.13.2
+
+# AI
 anthropic>=0.18.0
 openai>=1.0.0
 google-generativeai>=0.8.0
-pytest>=7.0.0
-python-multipart>=0.0.22
