@@ -1,7 +1,13 @@
 """Tests for Ask (AI) API and RAG pipeline."""
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+ASK_SCRIPT = REPO_ROOT / "scripts" / "ask.py"
 
 
 def parse_sse_lines(raw: bytes):
@@ -72,3 +78,30 @@ class TestLLMStatus:
         assert "model" in data
         assert data["provider"] in ("ollama", "claude", "gemini", "openai", "")
         assert isinstance(data["model"], str)
+
+
+class TestAskCLI:
+    """scripts/ask.py CLI."""
+
+    def test_ask_cli_help(self):
+        """--help works."""
+        r = subprocess.run(
+            [sys.executable, str(ASK_SCRIPT), "--help"],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert r.returncode == 0
+        assert "-q" in r.stdout or "--query" in r.stdout
+        assert "debug" in r.stdout.lower()
+
+    def test_ask_cli_empty_query_exits_nonzero(self):
+        """Empty query exits with error."""
+        r = subprocess.run(
+            [sys.executable, str(ASK_SCRIPT), "-q", ""],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert r.returncode != 0
+        assert "empty" in r.stderr.lower() or "error" in r.stderr.lower()

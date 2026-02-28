@@ -58,7 +58,8 @@
       <nav id="tree" class="tree" aria-label="Document tree"></nav>
     </aside>
     <div class="sidebar-resize" id="sidebar-resize" title="Drag to resize sidebar" aria-label="Resize sidebar"></div>
-    <main class="content">
+    <div class="content-wrapper" id="content-wrapper">
+      <main class="content" id="main-content">
       <div class="content-top">
         <div id="ask-ai" class="ask-ai ask-ai-inline collapsed">
           <div class="ask-ai-header" id="ask-ai-toggle">
@@ -66,14 +67,25 @@
             <span>Ask (AI)</span>
             <span class="ask-ai-chevron"></span>
           </div>
-          <div class="ask-ai-body">
+          <div class="ask-ai-body" id="ask-ai-body">
             <label for="ask-query-input" class="ask-ai-label">Question (answered from your docs only). Press Enter to ask.</label>
             <textarea id="ask-query-input" class="ask-query-input" rows="2" placeholder="e.g. How do we set up X?" aria-label="Ask a question"></textarea>
-            <p class="ask-hint">Index: run <code>python scripts/index_for_ai.py --profile quick|deep</code> or <button type="button" id="ask-reindex" class="btn-link">Quick rebuild</button> / <button type="button" id="ask-reindex-deep" class="btn-link">Deep rebuild (nomic)</button></p>
+            <div class="ask-ai-hint-row">
+              <p class="ask-hint">Index: <button type="button" id="ask-reindex" class="btn-link">Quick rebuild</button> / <button type="button" id="ask-reindex-deep" class="btn-link">Deep rebuild (nomic)</button></p>
+              <h4 class="ask-models-heading" id="ask-models-toggle" role="button" tabindex="0" aria-expanded="false">Models <span class="ask-models-chevron" aria-hidden="true"></span></h4>
+            </div>
+            <div id="ask-models-wrap" class="ask-models-wrap ask-models-collapsed">
+              <div id="ask-models" class="ask-models" aria-live="polite"></div>
+            </div>
+            <div id="ask-loading-dots" class="ask-loading-dots hidden" aria-hidden="true"><span class="ask-dot"></span><span class="ask-dot"></span><span class="ask-dot"></span></div>
             <div id="ask-answer" class="ask-answer hidden"></div>
-            <div id="ask-citations" class="ask-citations hidden"></div>
+            <div id="ask-citations-wrap" class="ask-citations-wrap hidden">
+              <h4 class="ask-citations-heading">Top 3 (cross-encoder ranked)</h4>
+              <div id="ask-citations" class="ask-citations"></div>
+            </div>
             <div id="ask-error" class="ask-error hidden"></div>
           </div>
+          <div class="ask-ai-resize" id="ask-ai-resize" title="Drag to resize height" aria-label="Resize Ask panel height"></div>
         </div>
       </div>
       <div id="doc-viewer-toolbar" class="doc-viewer-toolbar hidden" aria-label="Document view options">
@@ -131,6 +143,8 @@
         </div>
       </div>
     </main>
+    <div class="content-resize" id="content-resize" title="Drag to resize reading panel" aria-label="Resize reading panel"></div>
+    </div>
   </div>
   <script src="/app.js"></script>
 </body>

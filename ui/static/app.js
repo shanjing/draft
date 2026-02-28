@@ -954,6 +954,92 @@
     });
   })();
 
+  (function initContentResize() {
+    var layout = document.getElementById('layout');
+    var content = document.getElementById('main-content');
+    var handle = document.getElementById('content-resize');
+    if (!layout || !content || !handle) return;
+    var CONTENT_MAX_WIDTH_KEY = 'draft-content-max-width';
+    var MIN = 320;
+    var MAX = 1440;
+
+    function getMaxWidth() {
+      var w = parseFloat(getComputedStyle(content).getPropertyValue('--content-max-width')) || 832;
+      if (isNaN(w)) w = 832;
+      return w;
+    }
+    function setMaxWidth(px) {
+      var w = Math.min(MAX, Math.max(MIN, px));
+      content.style.setProperty('--content-max-width', w + 'px');
+      try { localStorage.setItem(CONTENT_MAX_WIDTH_KEY, String(w)); } catch (e) {}
+    }
+
+    var saved = null;
+    try { saved = localStorage.getItem(CONTENT_MAX_WIDTH_KEY); } catch (e) {}
+    if (saved != null) {
+      var n = parseFloat(saved);
+      if (!isNaN(n)) setMaxWidth(n);
+    }
+
+    handle.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      var startX = e.clientX;
+      var startW = getMaxWidth();
+      function move(ev) {
+        setMaxWidth(startW + (ev.clientX - startX));
+      }
+      function up() {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+  })();
+
+  (function initAskAiResize() {
+    var askAi = document.getElementById('ask-ai');
+    var askAiBody = document.getElementById('ask-ai-body');
+    var handle = document.getElementById('ask-ai-resize');
+    if (!askAi || !askAiBody || !handle) return;
+    var ASK_AI_HEIGHT_KEY = 'draft-ask-ai-height';
+    var MIN = 120;
+    var MAX = 600;
+
+    function getHeight() {
+      var h = parseFloat(getComputedStyle(askAiBody).getPropertyValue('--ask-ai-body-height')) || 320;
+      if (isNaN(h)) h = 320;
+      return h;
+    }
+    function setHeight(px) {
+      var h = Math.min(MAX, Math.max(MIN, px));
+      askAiBody.style.setProperty('--ask-ai-body-height', h + 'px');
+      try { localStorage.setItem(ASK_AI_HEIGHT_KEY, String(h)); } catch (e) {}
+    }
+
+    var saved = null;
+    try { saved = localStorage.getItem(ASK_AI_HEIGHT_KEY); } catch (e) {}
+    if (saved != null) {
+      var n = parseFloat(saved);
+      if (!isNaN(n)) setHeight(n);
+    }
+
+    handle.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      var startY = e.clientY;
+      var startH = getHeight();
+      function move(ev) {
+        setHeight(startH + (ev.clientY - startY));
+      }
+      function up() {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+  })();
+
   function refreshTree() {
     fetch('/api/tree')
       .then(function (r) { return r.json(); })
@@ -1513,7 +1599,11 @@
     var askPanel = document.getElementById('ask-ai');
     var askToggle = document.getElementById('ask-ai-toggle');
     var queryInput = document.getElementById('ask-query-input');
+    var modelsWrapEl = document.getElementById('ask-models-wrap');
+    var modelsEl = document.getElementById('ask-models');
     var answerEl = document.getElementById('ask-answer');
+    var loadingDotsEl = document.getElementById('ask-loading-dots');
+    var citationsWrapEl = document.getElementById('ask-citations-wrap');
     var citationsEl = document.getElementById('ask-citations');
     var errorEl = document.getElementById('ask-error');
     if (!askPanel || !queryInput) return;
@@ -1522,6 +1612,21 @@
     askToggle.addEventListener('click', function () {
       askPanel.classList.toggle('collapsed');
     });
+    var modelsToggle = document.getElementById('ask-models-toggle');
+    var modelsWrap = document.getElementById('ask-models-wrap');
+    function toggleModelsSection() {
+      if (!modelsWrap) return;
+      var collapsed = modelsWrap.classList.contains('ask-models-collapsed');
+      if (collapsed) modelsWrap.classList.remove('ask-models-collapsed');
+      else modelsWrap.classList.add('ask-models-collapsed');
+      if (modelsToggle) modelsToggle.setAttribute('aria-expanded', collapsed ? 'true' : 'false');
+    }
+    if (modelsToggle && modelsWrap) {
+      modelsToggle.addEventListener('click', toggleModelsSection);
+      modelsToggle.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleModelsSection(); }
+      });
+    }
 
     var reindexBtn = document.getElementById('ask-reindex');
     var reindexDeepBtn = document.getElementById('ask-reindex-deep');
@@ -1597,13 +1702,13 @@
       if (!query || askInProgress) return;
       askInProgress = true;
       queryInput.disabled = true;
+      if (modelsEl) modelsEl.textContent = '';
       answerEl.classList.add('hidden');
       answerEl.textContent = '';
-      citationsEl.classList.add('hidden');
-      citationsEl.innerHTML = '';
+      if (citationsWrapEl) citationsWrapEl.classList.add('hidden');
+      if (citationsEl) citationsEl.innerHTML = '';
       showAskError('');
-      answerEl.classList.remove('hidden');
-      answerEl.textContent = '…';
+      if (loadingDotsEl) { loadingDotsEl.classList.remove('hidden'); loadingDotsEl.setAttribute('aria-hidden', 'false'); }
 
       appendConsoleLine('$ ask: ' + query);
       appendConsoleLine('Streaming…');
@@ -1652,30 +1757,52 @@
             });
           }
           function handleEvent(data) {
+            if (data.type === 'models') {
+              var embed = data.embed_model || '?';
+              var encoder = data.cross_encoder_model || '?';
+              var llm = data.llm_model || '?';
+              if (modelsEl) {
+                modelsEl.innerHTML =
+                  '<div class="ask-models-row"><span class="ask-models-label">embed</span> <span class="ask-models-value">' + escapeHtml(embed) + '</span></div>' +
+                  '<div class="ask-models-row"><span class="ask-models-label">encoder</span> <span class="ask-models-value">' + escapeHtml(encoder) + '</span></div>' +
+                  '<div class="ask-models-row"><span class="ask-models-label">LLM</span> <span class="ask-models-value">' + escapeHtml(llm) + '</span></div>';
+              }
+              if (askPanel && askPanel.classList.contains('collapsed')) askPanel.classList.remove('collapsed');
+              appendConsoleLine('Models: embed=' + embed + ', encoder=' + encoder + ', LLM=' + llm);
+            }
             if (data.type === 'text' && data.text) {
+              if (loadingDotsEl) { loadingDotsEl.classList.add('hidden'); loadingDotsEl.setAttribute('aria-hidden', 'true'); }
               fullText += data.text;
               answerEl.textContent = fullText;
+              answerEl.classList.remove('hidden');
+              if (askPanel && askPanel.classList.contains('collapsed')) askPanel.classList.remove('collapsed');
             }
-            if (data.type === 'citations' && data.citations) {
+            if (data.type === 'citations' && data.citations && citationsEl) {
               citationsEl.innerHTML = data.citations.map(function (c, i) {
                 var num = i + 1;
-                var label = c.repo + '/' + c.path + (c.heading ? ' — ' + c.heading : '');
-                if (c.start_line != null && c.end_line != null) {
-                  label += ' (lines ' + c.start_line + '–' + c.end_line + ')';
-                }
+                var scoreStr = (c.score != null && c.score !== '') ? String(c.score) : '—';
                 var attrs = 'data-repo="' + escapeAttr(c.repo) + '" data-path="' + escapeAttr(c.path) + '"';
                 if (c.start_line != null) attrs += ' data-start-line="' + String(c.start_line) + '"';
                 if (c.end_line != null) attrs += ' data-end-line="' + String(c.end_line) + '"';
                 var block = '<div class="ask-citation-item">' +
-                  num + '. <a href="#" ' + attrs + '>' + escapeHtml(label) + '</a>';
+                  '<div class="ask-citation-header">' +
+                  '<span class="ask-citation-rank">#' + num + '</span> ' +
+                  '<span class="ask-citation-score-label">rerank score</span> <span class="ask-citation-score-value">[' + escapeHtml(scoreStr) + ']</span>' +
+                  '</div>' +
+                  '<a href="#" class="ask-citation-link" ' + attrs + '>' +
+                  escapeHtml(c.repo + '/' + c.path) +
+                  (c.heading ? ' <span class="ask-citation-heading">— ' + escapeHtml(c.heading) + '</span>' : '') +
+                  '</a>' +
+                  (c.start_line != null && c.end_line != null ? '<div class="ask-citation-meta">lines ' + c.start_line + '–' + c.end_line + '</div>' : '');
                 if (c.snippet) {
                   block += '<pre class="ask-citation-snippet">' + escapeHtml(c.snippet) + '</pre>';
                 }
                 block += '</div>';
                 return block;
               }).join('');
-              citationsEl.classList.remove('hidden');
-              citationsEl.querySelectorAll('a').forEach(function (a) {
+              if (citationsWrapEl) citationsWrapEl.classList.remove('hidden');
+              if (askPanel && askPanel.classList.contains('collapsed')) askPanel.classList.remove('collapsed');
+              citationsEl.querySelectorAll('.ask-citation-link').forEach(function (a) {
                 a.addEventListener('click', function (e) {
                   e.preventDefault();
                   var startLine = a.dataset.startLine;
@@ -1693,11 +1820,14 @@
             }
           }
           function finish() {
-            if (!answerEl.textContent || answerEl.textContent === '…') answerEl.textContent = '(No answer.)';
+            if (loadingDotsEl) { loadingDotsEl.classList.add('hidden'); loadingDotsEl.setAttribute('aria-hidden', 'true'); }
+            if (!answerEl.textContent) answerEl.textContent = '(No answer.)';
+            answerEl.classList.remove('hidden');
             appendConsoleLine('Ask complete.');
             done();
           }
           return read().catch(function (err) {
+            if (loadingDotsEl) loadingDotsEl.classList.add('hidden');
             showAskError(err.message || 'Request failed.');
             appendConsoleLine('Ask failed: ' + (err.message || ''));
             answerEl.classList.add('hidden');
@@ -1705,6 +1835,7 @@
           });
         })
         .catch(function (err) {
+          if (loadingDotsEl) loadingDotsEl.classList.add('hidden');
           showAskError(err.message || 'Request failed.');
           appendConsoleLine('Ask failed: ' + (err.message || ''));
           answerEl.classList.add('hidden');

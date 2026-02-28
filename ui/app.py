@@ -48,6 +48,8 @@ try:
     load_dotenv(DRAFT_ROOT / ".env")
 except ImportError:
     pass
+# Prefer offline: no Hugging Face network use unless explicitly enabled
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 from lib.log import logger, configure as configure_log
 from lib.manifest import parse_sources_yaml
@@ -316,6 +318,8 @@ def api_ask(body: AskBody):
                     yield f"data: {json.dumps({'type': 'text', 'text': payload})}\n\n"
                 elif kind == "citations":
                     yield f"data: {json.dumps({'type': 'citations', 'citations': payload})}\n\n"
+                elif kind == "models":
+                    yield f"data: {json.dumps({'type': 'models', 'embed_model': payload.get('embed_model'), 'cross_encoder_model': payload.get('cross_encoder_model'), 'llm_model': payload.get('llm_model')})}\n\n"
                 elif kind == "error":
                     yield f"data: {json.dumps({'type': 'error', 'error': payload})}\n\n"
         except Exception as e:

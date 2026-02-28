@@ -303,7 +303,7 @@ check_sources_consistency() {
   fi
 }
 
-# Show current state for existing install: sources, vault file count, LLM config, RAG index.
+# Show current state for existing install: sources, vault file count, LLM config.
 show_current_state() {
   printf "${D}--- Current state ---${N}\n"
   list_tracked_sources
@@ -323,6 +323,13 @@ show_current_state() {
   else
     printf "  ${D}LLM: not configured${N}\n"
   fi
+  if [ -f "$SCRIPT_DIR/.env" ]; then
+    _emb=$(grep -E '^[[:space:]]*DRAFT_EMBED_MODEL[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+    _cross=$(grep -E '^[[:space:]]*DRAFT_CROSS_ENCODER_MODEL[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]*//;s/['\"]?[[:space:]]*$//" | head -1)
+    [ -n "$_emb" ] && printf "  ${D}Embed: %s${N}\n" "$_emb"
+    [ -n "$_cross" ] && printf "  ${D}Cross-encoder: %s${N}\n" "$_cross"
+    unset _emb _cross
+  fi
   if [ -d "$SCRIPT_DIR/.vector_store" ] && [ -n "$(find "$SCRIPT_DIR/.vector_store" -type f 2>/dev/null | head -1)" ]; then
     _rag_model=$(cd "$SCRIPT_DIR" && "$PYTHON" -c "
 import sys
@@ -340,7 +347,7 @@ except Exception:
     print('')
 " 2>/dev/null) || _rag_model=""
     _rag_model="${_rag_model:-?}"
-    printf "  ${D}RAG index: %s, freshly baked${N}\n" "$_rag_model"
+    printf "  ${D}RAG index: %s${N}\n" "$_rag_model"
   else
     printf "  ${D}RAG index: not built${N}\n"
   fi
@@ -408,6 +415,293 @@ verify_openai_key() {
   [ -z "$key" ] && return 1
   key="$(printf '%s' "$key" | tr -d '\n\r')"
   [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X GET "https://api.openai.com/v1/models" -H "Authorization: Bearer ${key}" 2>/dev/null)" = "200" ]
+}
+
+# Default embedding and cross-encoder models (Hugging Face, run locally)
+DEFAULT_EMBED_MODEL="sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_CROSS_ENCODER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+# Map Ollama embedding model name -> Hugging Face equivalent (for sentence-transformers).
+# Models without a mapping use the Ollama name (requires Ollama embedding support in lib).
+ollama_embed_to_hf() {
+  local name="$1"
+  case "$name" in
+    nomic-embed-text*) echo "nomic-ai/nomic-embed-text-v1.5" ;;
+    qwen3-embedding:8b*) echo "Qwen/Qwen3-Embedding-8B" ;;
+    qwen3-embedding:0.6b*) echo "Qwen/Qwen3-Embedding-0.6B" ;;
+    qwen3-embedding*) echo "Qwen/Qwen3-Embedding-8B" ;;
+    *) echo "$name" ;;
+  esac
+}
+
+# Qwen3 pairs: embedding + reranker. Gold = 8b embed + 0.6B reranker (best balance).
+OLLAMA_QWEN3_8B_EMBED="qwen3-embedding:8b"
+OLLAMA_QWEN3_8B_RERANKER="dengcao/Qwen3-Reranker-8B:Q3_K_M"
+OLLAMA_QWEN3_06B_EMBED="qwen3-embedding:0.6b"
+OLLAMA_QWEN3_06B_RERANKER="dengcao/Qwen3-Reranker-0.6B:Q8_0"
+# Hugging Face model names for embed + cross-encoder (sentence-transformers)
+HF_QWEN3_8B_EMBED="Qwen/Qwen3-Embedding-8B"
+HF_QWEN3_8B_RERANKER="dengcao/Qwen3-Reranker-8B"
+HF_QWEN3_06B_EMBED="Qwen/Qwen3-Embedding-0.6B"
+HF_QWEN3_06B_RERANKER="dengcao/Qwen3-Reranker-0.6B"
+
+do_config_embed_flow() {
+  local embed_model="$DEFAULT_EMBED_MODEL"
+  local cross_encoder_model="$DEFAULT_CROSS_ENCODER_MODEL"
+  local has_local=0
+  local use_cloud_embed=0
+  local use_ollama_embed=0
+  local mem_gb=0
+  local cpu_count=0
+  local skip_to_summary=0
+  local qwen3_all_present=0
+
+  printf "\n${D}--- Configure embedding and cross-encoder models ---${N}\n"
+  printf "  Default: embed=%s, cross-encoder=%s\n" "$DEFAULT_EMBED_MODEL" "$DEFAULT_CROSS_ENCODER_MODEL"
+  echo ""
+
+  # Step 1: If Ollama found, suggest Qwen3 pairs and offer to download (unless already present)
+  if command -v ollama >/dev/null 2>&1; then
+    OLLAMA_NAMES=""
+    while IFS= read -r n; do [ -n "$n" ] && OLLAMA_NAMES="${OLLAMA_NAMES}${OLLAMA_NAMES:+ }$n"; done < <(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+    qwen3_all_present=1
+    for want in "$OLLAMA_QWEN3_8B_EMBED" "$OLLAMA_QWEN3_8B_RERANKER" "$OLLAMA_QWEN3_06B_EMBED" "$OLLAMA_QWEN3_06B_RERANKER"; do
+      if [[ " $OLLAMA_NAMES " != *" $want "* ]]; then
+        qwen3_all_present=0
+        break
+      fi
+    done
+    if [ "$qwen3_all_present" = "1" ]; then
+      printf "  ${G}Qwen3 pairs already available (Ollama).${N}\n"
+    else
+      printf "  ${G}Suggested Qwen3 pairs (embedding + reranker):${N}\n"
+      printf "    - Gold : %s + %s (best balance: deep memory, fast verification, takes more time to build the index)${N}\n" "$OLLAMA_QWEN3_8B_EMBED" "$OLLAMA_QWEN3_06B_RERANKER"
+      printf "    - 8B+8B:  %s + %s${N}\n" "$OLLAMA_QWEN3_8B_EMBED" "$OLLAMA_QWEN3_8B_RERANKER"
+      printf "    - 0.6B+0.6B: %s + %s${N}\n" "$OLLAMA_QWEN3_06B_EMBED" "$OLLAMA_QWEN3_06B_RERANKER"
+      printf "    **Note**: for most Macbooks, Mac Mini and PCs, use the default model.${N}"
+      echo ""
+      read -r -p "Download these pairs from Ollama? (y/N): " download_choice
+      download_choice="$(printf '%s' "${download_choice:-n}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      if [ "$download_choice" = "y" ] || [ "$download_choice" = "yes" ]; then
+        printf "  ${D}Pulling models...${N}\n"
+        ollama pull "$OLLAMA_QWEN3_8B_EMBED" || true
+        ollama pull "$OLLAMA_QWEN3_8B_RERANKER" || true
+        ollama pull "$OLLAMA_QWEN3_06B_EMBED" || true
+        ollama pull "$OLLAMA_QWEN3_06B_RERANKER" || true
+        printf "  ${G}Done.${N}\n"
+      else
+        skip_to_summary=1
+        printf "  ${D}Using default models.${N}\n"
+      fi
+    fi
+  fi
+
+  # If user chose N, skip to summary
+  if [ "$skip_to_summary" = "1" ]; then
+    (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_embed_config.py "$embed_model" "$cross_encoder_model")
+    printf "  ${G}✓${N} Config saved to .env. Rebuild RAG index to apply.\n"
+    echo ""
+    return
+  fi
+
+  # Step 2: Dynamically detect embedding models from ollama list (names containing "embed" or "embedding")
+  OLLAMA_EMBED_AVAILABLE=()
+  if command -v ollama >/dev/null 2>&1; then
+    while IFS= read -r name; do
+      [ -z "$name" ] && continue
+      name_lower="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+      if [[ "$name_lower" == *embed* ]] || [[ "$name_lower" == *embedding* ]]; then
+        OLLAMA_EMBED_AVAILABLE+=("$name")
+      fi
+    done < <(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+  fi
+
+  if [ ${#OLLAMA_EMBED_AVAILABLE[@]} -gt 0 ]; then
+    has_local=1
+    # Step 3: Check hardware and suggest
+    case "$OS" in
+      Darwin)
+        mem_gb=$(($(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 / 1024 / 1024))
+        cpu_count=$(sysctl -n hw.ncpu 2>/dev/null || echo 0)
+        ;;
+      Linux)
+        mem_gb=$(($(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}') / 1024 / 1024))
+        cpu_count=$(nproc 2>/dev/null || echo 0)
+        ;;
+      *) mem_gb=0; cpu_count=0 ;;
+    esac
+
+    printf "  ${G}Local Qwen3 models detected (Ollama):${N}\n"
+    if [ "$qwen3_all_present" = "1" ]; then
+      printf "    - %s -> %s (embed)${N}\n" "$OLLAMA_QWEN3_8B_EMBED" "$HF_QWEN3_8B_EMBED"
+      printf "    - %s -> %s (embed)${N}\n" "$OLLAMA_QWEN3_06B_EMBED" "$HF_QWEN3_06B_EMBED"
+      printf "    - %s (reranker)${N}\n" "$OLLAMA_QWEN3_8B_RERANKER"
+      printf "    - %s (reranker)${N}\n" "$OLLAMA_QWEN3_06B_RERANKER"
+    else
+      for m in "${OLLAMA_EMBED_AVAILABLE[@]}"; do
+        suggested="$(ollama_embed_to_hf "$m")"
+        if [ "$suggested" = "$m" ]; then
+          printf "    - %s (Ollama; lib support may be needed)${N}\n" "$m"
+        else
+          printf "    - %s -> %s (HF)${N}\n" "$m" "$suggested"
+        fi
+      done
+    fi
+    if [ "$mem_gb" -ge 8 ]; then
+      printf "  ${D}Hardware: %s GB RAM, %s CPU(s). Local models recommended for better accuracy.${N}\n" "$mem_gb" "$cpu_count"
+    else
+      printf "  ${D}Hardware: %s GB RAM. Default models are lighter; local models may use more memory.${N}\n" "$mem_gb"
+    fi
+    printf "  ${D}Default models work well. Local models can offer more accurate results but may takes hours to build the vectorindexes.${N}\n"
+    echo ""
+
+    # Step 4: Ask default, Qwen3 pair (G/L/S), or first local
+    if [ "$qwen3_all_present" = "1" ]; then
+      printf "  ${D}G=Gold (8b embed + 0.6B reranker, recommended), L=(8B embed + 8B reranker, slow), S=(0.6B embed + 0.6B reranker fast)${N}\n"
+      read -r -p "Use default (d), Gold (G), 8B+8B (L), or 0.6B+0.6B (S)? [d/G/L/S] (default d): " choice
+      choice="$(printf '%s' "${choice:-d}" | tr '[:lower:]' '[:upper:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      case "$choice" in
+        G)
+          embed_model="$OLLAMA_QWEN3_8B_EMBED"
+          cross_encoder_model="$OLLAMA_QWEN3_06B_RERANKER"
+          use_ollama_embed=1
+          printf "  ${G}Using Gold pair: embed=%s, reranker=%s (Ollama, no download)${N}\n" "$embed_model" "$cross_encoder_model"
+          ;;
+        L)
+          embed_model="$OLLAMA_QWEN3_8B_EMBED"
+          cross_encoder_model="$OLLAMA_QWEN3_8B_RERANKER"
+          use_ollama_embed=1
+          printf "  ${G}Using 8B+8B pair: embed=%s, reranker=%s (Ollama, no download)${N}\n" "$embed_model" "$cross_encoder_model"
+          ;;
+        S)
+          embed_model="$OLLAMA_QWEN3_06B_EMBED"
+          cross_encoder_model="$OLLAMA_QWEN3_06B_RERANKER"
+          use_ollama_embed=1
+          printf "  ${G}Using 0.6B+0.6B pair: embed=%s, reranker=%s (Ollama, no download)${N}\n" "$embed_model" "$cross_encoder_model"
+          ;;
+        *)
+          printf "  ${D}Using default models.${N}\n"
+          ;;
+      esac
+    else
+      read -r -p "Use default models (d) or local Ollama models (l)? [d/l] (default d): " choice
+      choice="$(printf '%s' "${choice:-d}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      if [ "$choice" = "l" ] && [ ${#OLLAMA_EMBED_AVAILABLE[@]} -gt 0 ]; then
+        first_ollama="${OLLAMA_EMBED_AVAILABLE[0]}"
+        embed_model="$first_ollama"
+        use_ollama_embed=1
+        printf "  ${G}Using local embed: %s (Ollama, no download), cross-encoder stays %s${N}\n" "$embed_model" "$cross_encoder_model"
+      else
+        printf "  ${D}Using default models.${N}\n"
+      fi
+    fi
+  else
+    # Step 5: No local models
+    printf "  ${D}No local embedding models found (Ollama). Default models are already set.${N}\n"
+    read -r -p "Use cloud-based embedding models? (y/N): " use_cloud
+    use_cloud="$(printf '%s' "${use_cloud:-n}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    if [ "$use_cloud" = "y" ] || [ "$use_cloud" = "yes" ]; then
+      printf "  ${D}Cloud embedding providers: OpenAI (text-embedding-3-small).${N}\n"
+      read -r -p "Skip and use default? (Y/n): " skip_cloud
+      skip_cloud="$(printf '%s' "${skip_cloud:-y}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      if [ "$skip_cloud" != "n" ] && [ "$skip_cloud" != "no" ]; then
+        printf "  ${D}Using default models.${N}\n"
+      else
+        read -r -p "Embedding model (e.g. text-embedding-3-small): " cloud_embed
+        cloud_embed="$(printf '%s' "$cloud_embed" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        if [ -z "$cloud_embed" ]; then
+          printf "  ${D}Skipped. Using default.${N}\n"
+        else
+          read -r -s -p "OpenAI API key: " api_key
+          echo ""
+          api_key="$(printf '%s' "$api_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -z "$api_key" ]; then
+            printf "  ${D}Skipped. Using default.${N}\n"
+          else
+            printf "${D}Verifying...${N}\n"
+            if verify_openai_key "$api_key"; then
+              (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_env_writer.py --mode openai --model "gpt-4o-mini" --api-key "$api_key" 2>/dev/null) || true
+              embed_model="$cloud_embed"
+              use_cloud_embed=1
+              printf "  ${G}API key valid. Cloud embedding configured (requires RAG index rebuild).${N}\n"
+            else
+              printf "  ${R}Invalid key. Using default models.${N}\n"
+            fi
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # Step 6: Summary and write config
+  while true; do
+    printf "\n  ${D}Summary:${N}\n"
+    printf "    embed_model: %s%s\n" "$embed_model" "$([ "$use_ollama_embed" = "1" ] && printf ' (Ollama, no download)' || true)"
+    printf "    cross_encoder_model: %s\n" "$cross_encoder_model"
+    echo ""
+    read -r -p "Press C to continue (default), M to modify: " confirm
+    confirm="$(printf '%s' "${confirm:-c}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    case "$confirm" in
+      c)
+        if [ "$use_cloud_embed" = "1" ]; then
+          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_embed_config.py "$embed_model" "$cross_encoder_model" --provider openai)
+        elif [ "$use_ollama_embed" = "1" ]; then
+          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_embed_config.py "$embed_model" "$cross_encoder_model" --provider ollama)
+        else
+          (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_embed_config.py "$embed_model" "$cross_encoder_model")
+        fi
+        printf "  ${G}✓${N} Config saved to .env. Rebuild RAG index to apply.\n"
+        break
+        ;;
+      m)
+        use_cloud_embed=0
+        if [ "$has_local" = "1" ]; then
+          if [ "$qwen3_all_present" = "1" ]; then
+            read -r -p "Use default (d), Gold (G), 8B+8B (L), or 0.6B+0.6B (S)? [d/G/L/S]: " choice
+            choice="$(printf '%s' "${choice:-d}" | tr '[:lower:]' '[:upper:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            case "$choice" in
+              G)
+                embed_model="$OLLAMA_QWEN3_8B_EMBED"
+                cross_encoder_model="$OLLAMA_QWEN3_06B_RERANKER"
+                use_ollama_embed=1
+                ;;
+              L)
+                embed_model="$OLLAMA_QWEN3_8B_EMBED"
+                cross_encoder_model="$OLLAMA_QWEN3_8B_RERANKER"
+                use_ollama_embed=1
+                ;;
+              S)
+                embed_model="$OLLAMA_QWEN3_06B_EMBED"
+                cross_encoder_model="$OLLAMA_QWEN3_06B_RERANKER"
+                use_ollama_embed=1
+                ;;
+              *)
+                embed_model="$DEFAULT_EMBED_MODEL"
+                cross_encoder_model="$DEFAULT_CROSS_ENCODER_MODEL"
+                use_ollama_embed=0
+                ;;
+            esac
+          else
+            read -r -p "Use default (d) or local (l)? [d]: " choice
+            choice="${choice:-d}"
+            if [ "$choice" = "l" ]; then
+              first_ollama="${OLLAMA_EMBED_AVAILABLE[0]}"
+              embed_model="$first_ollama"
+              use_ollama_embed=1
+            else
+              embed_model="$DEFAULT_EMBED_MODEL"
+              use_ollama_embed=0
+            fi
+          fi
+        else
+          embed_model="$DEFAULT_EMBED_MODEL"
+          cross_encoder_model="$DEFAULT_CROSS_ENCODER_MODEL"
+        fi
+        ;;
+      *) printf "  ${D}Invalid. Use C or M.${N}\n" ;;
+    esac
+  done
+  echo ""
 }
 
 # --- Action flows (used by both new-install wizard and existing-install menu) ---
@@ -647,7 +941,7 @@ do_start_ui_flow() {
   if [ "$DRAFT_START_UI" = "Y" ]; then
     start_ui=y
   else
-    read -r -p "Start the Draft UI? (Y/n): " start_ui
+    read -r -p "Start or restart the Draft UI? (Y/n): " start_ui
     start_ui="${start_ui:-y}"
   fi
   case "$start_ui" in
@@ -679,20 +973,27 @@ while true; do
   printf "${D}Consistency check:${N}\n"
   check_sources_consistency
   echo ""
+  printf "${D}Default models for embedding and cross-encoder are already set. You can change them via step 2 below.${N}\n"
+  printf "${D}If this is your first time setting up Draft and you want semantic search via LLM, we recommend${N}\n"
+  printf "${D}step 3 (Configure LLM) and step 4 (Build RAG index). Choosing different embedding models is optional.${N}\n"
+  printf "${D}To configure manually, edit .env and set DRAFT_EMBED_MODEL, DRAFT_CROSS_ENCODER_MODEL, DRAFT_LLM_PROVIDER, OLLAMA_MODEL, etc.${N}\n"
+  echo ""
   printf "What should the setup do next?\n"
   printf "  1) Add doc sources\n"
-  printf "  2) Reconfigure LLM\n"
-  printf "  3) Rebuild RAG/index\n"
-  printf "  4) Start the Draft UI\n"
-  printf "  5) Done\n"
-  read -r -p "Choice (1-5) [4]: " menu_choice
-  menu_choice="${menu_choice:-4}"
+  printf "  2) Configure embedding/cross-encoder models\n"
+  printf "  3) Configure LLM\n"
+  printf "  4) Build RAG/index (chunking and embeddings)\n"
+  printf "  5) Start or restart the Draft UI\n"
+  printf "  6) Done/Exit the setup\n"
+  read -r -p "Choice (1-6) [5]: " menu_choice
+  menu_choice="${menu_choice:-5}"
   case "$menu_choice" in
     1) DRAFT_ADD_SOURCES=Y do_add_sources_flow ;;
-    2) DRAFT_CONFIG_LLM=Y do_config_llm_flow ;;
-    3) DRAFT_BUILD_RAG=Y do_build_rag_flow ;;
-    4) DRAFT_START_UI=Y do_start_ui_flow; exit 0 ;;
-    5) printf "${D}Done.${N}\n"; exit 0 ;;
+    2) do_config_embed_flow ;;
+    3) DRAFT_CONFIG_LLM=Y do_config_llm_flow ;;
+    4) DRAFT_BUILD_RAG=Y do_build_rag_flow ;;
+    5) DRAFT_START_UI=Y do_start_ui_flow; exit 0 ;;
+    6) printf "${D}Done.${N}\n"; exit 0 ;;
     *) printf "${D}Invalid.${N}\n" ;;
   esac
   echo ""
