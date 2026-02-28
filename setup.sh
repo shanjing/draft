@@ -888,6 +888,7 @@ do_config_llm_flow() {
         fi
       done
       echo ""
+      printf "  ${D}If you run Draft in Docker, restart the container (option 6) to pick up the new LLM.${N}\n"
       ;;
     *)
       echo "Skipping LLM configuration."
@@ -963,6 +964,125 @@ do_start_ui_flow() {
   esac
 }
 
+# Read a key from .env (stripped). Usage: _env_val KEY .env
+_env_val() {
+  local key="$1" file="${2:-$SCRIPT_DIR/.env}"
+  [ ! -f "$file" ] && return 0
+  grep -E "^[[:space:]]*${key}[[:space:]]*=" "$file" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1
+}
+
+# Docker-specific env: OLLAMA_HOST so container can reach host Ollama. Only when using local Ollama.
+ensure_env_docker() {
+  local env_docker="$SCRIPT_DIR/.env.docker"
+  if [ ! -f "$env_docker" ] || ! grep -q "OLLAMA_HOST" "$env_docker" 2>/dev/null; then
+    printf "# Docker-only overrides (used with: docker run --env-file .env --env-file .env.docker)\n" > "$env_docker"
+    printf "# OLLAMA_HOST lets the container reach Ollama on the host (Docker Desktop: host.docker.internal)\n" >> "$env_docker"
+    printf "OLLAMA_HOST=http://host.docker.internal:11434\n" >> "$env_docker"
+    printf "  ${G}Created %s${N}\n" "$env_docker"
+  fi
+}
+
+do_docker_flow() {
+  printf "\n${D}--- Run Draft in a Docker container ---${N}\n"
+  if ! command -v docker >/dev/null 2>&1; then
+    printf "  ${R}Docker not found. Install Docker Desktop (or docker-engine) and try again.${N}\n"
+    return 1
+  fi
+  if [ ! -f "$SCRIPT_DIR/.env" ] && [ -f "$SCRIPT_DIR/.env.example" ]; then
+    cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
+    printf "  ${G}Created .env from .env.example. Edit .env if you need to set LLM/embed config.${N}\n"
+  fi
+
+  # Detect LLM config so Docker run aligns with local settings
+  local provider ollama_model anth_key gemini_key openai_key use_ollama use_cloud
+  provider="$(_env_val DRAFT_LLM_PROVIDER)"
+  provider="$(printf '%s' "$provider" | tr '[:upper:]' '[:lower:]')"
+  ollama_model="$(_env_val OLLAMA_MODEL)"
+  [ -z "$ollama_model" ] && ollama_model="$(_env_val DRAFT_LLM_MODEL)"
+  anth_key="$(_env_val ANTHROPIC_API_KEY)"
+  gemini_key="$(_env_val GEMINI_API_KEY)"
+  [ -z "$gemini_key" ] && gemini_key="$(_env_val GOOGLE_API_KEY)"
+  openai_key="$(_env_val OPENAI_API_KEY)"
+
+  use_ollama=0
+  use_cloud=0
+  if [ "$provider" = "ollama" ] || { [ -z "$provider" ] && [ -n "$ollama_model" ]; }; then
+    use_ollama=1
+  fi
+  if [ "$provider" = "claude" ] && [ -n "$anth_key" ]; then
+    use_cloud=1
+  fi
+  if [ "$provider" = "gemini" ] && [ -n "$gemini_key" ]; then
+    use_cloud=1
+  fi
+  if [ "$provider" = "openai" ] && [ -n "$openai_key" ]; then
+    use_cloud=1
+  fi
+
+  if [ "$use_ollama" -eq 1 ]; then
+    ensure_env_docker
+    printf "  ${G}Local LLM (Ollama) detected.${N} Container will use OLLAMA_HOST to reach host Ollama.\n"
+  elif [ "$use_cloud" -eq 1 ]; then
+    printf "  ${G}Cloud LLM configured.${N} Container will use your API keys from .env.\n"
+  else
+    printf "  ${D}No LLM configured.${N} Ask (AI) / semantic search will not work in the container.\n"
+    printf "  Configure LLM in step 3 (Configure LLM), or run Docker to browse docs only.\n"
+    read -r -p "Run anyway (browse docs only)? (y/N): " run_anyway
+    run_anyway="$(printf '%s' "${run_anyway:-n}" | tr '[:upper:]' '[:lower:]')"
+    case "$run_anyway" in
+      [yY]|[yY][eE][sS]) ;;
+      *)
+        printf "  ${D}Exiting. Choose step 3 to configure LLM, then try Docker again.${N}\n"
+        return 0
+        ;;
+    esac
+  fi
+
+  if ! docker image inspect draft-ui >/dev/null 2>&1; then
+    read -r -p "Build the draft-ui image now? (Y/n): " build_choice
+    build_choice="${build_choice:-y}"
+    case "$build_choice" in
+      [yY]|[yY][eE][sS])
+        printf "  ${D}Building image...${N}\n"
+        (cd "$SCRIPT_DIR" && docker build -t draft-ui .) || return 1
+        printf "  ${G}Image draft-ui built.${N}\n"
+        ;;
+      *)
+        printf "  ${D}Build later with: docker build -t draft-ui .${N}\n"
+        return 0
+        ;;
+    esac
+  fi
+
+  # If a draft-ui container is already running, stop it so we start fresh with current .env
+  _running=$(docker ps -q --filter "ancestor=draft-ui" 2>/dev/null)
+  if [ -n "$_running" ]; then
+    printf "  ${D}Stopping existing draft-ui container...${N}\n"
+    docker stop $_running 2>/dev/null || true
+    sleep 2
+  fi
+  unset _running
+
+  printf "  Starting container (port 8058, data from %s)...\n" "$DRAFT_HOME"
+  if [ "$use_ollama" -eq 1 ]; then
+    printf "  ${D}Using --env-file .env and .env.docker (OLLAMA_HOST for host Ollama).${N}\n"
+    docker run -p 8058:8058 \
+      -v "${DRAFT_HOME}:/.draft" \
+      -e DRAFT_HOME=/.draft \
+      --env-file "$SCRIPT_DIR/.env" \
+      --env-file "$SCRIPT_DIR/.env.docker" \
+      draft-ui
+  else
+    printf "  ${D}Using --env-file .env.${N}\n"
+    docker run -p 8058:8058 \
+      -v "${DRAFT_HOME}:/.draft" \
+      -e DRAFT_HOME=/.draft \
+      --env-file "$SCRIPT_DIR/.env" \
+      draft-ui
+  fi
+  # Note: container runs in foreground; when user Ctrl+C, container stops. For daemon: add -d.
+}
+
 # --- Main flow: menu (single entrance for new and existing installs) ---
 printf "${D}--- Environment check ---${N}\n"
 printf "  %b\n" "$(check_venv && echo "${G}✓${N} .venv exists" || echo "${R}✗${N} .venv missing")"
@@ -983,9 +1103,10 @@ while true; do
   printf "  2) Configure embedding/cross-encoder models\n"
   printf "  3) Configure LLM\n"
   printf "  4) Build RAG/index (chunking and embeddings)\n"
-  printf "  5) Start or restart the Draft UI\n"
-  printf "  6) Done/Exit the setup\n"
-  read -r -p "Choice (1-6) [5]: " menu_choice
+  printf "  5) Start/restart the Draft UI in the local host (default)\n"
+  printf "  6) Run Draft in a Docker container\n"
+  printf "  7) Done/Exit the setup\n"
+  read -r -p "Choice (1-7) [5]: " menu_choice
   menu_choice="${menu_choice:-5}"
   case "$menu_choice" in
     1) DRAFT_ADD_SOURCES=Y do_add_sources_flow ;;
@@ -993,7 +1114,8 @@ while true; do
     3) DRAFT_CONFIG_LLM=Y do_config_llm_flow ;;
     4) DRAFT_BUILD_RAG=Y do_build_rag_flow ;;
     5) DRAFT_START_UI=Y do_start_ui_flow; exit 0 ;;
-    6) printf "${D}Done.${N}\n"; exit 0 ;;
+    6) do_docker_flow; exit 0 ;;
+    7) printf "${D}Done.${N}\n"; exit 0 ;;
     *) printf "${D}Invalid.${N}\n" ;;
   esac
   echo ""

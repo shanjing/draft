@@ -19,11 +19,15 @@ See [Using setup.sh](#using-setupsh) below for what the script does and how to u
 **Option A — daemon (recommended):** starts the server in the background and opens the app in your browser.
 
 ```bash
-./start.sh          # default port 8058
-./start.sh 8059     # custom port
+./draft.sh              # start on default port 8058
+./draft.sh -p 8059      # start on port 8059
+./draft.sh -s           # stop (default port 8058)
+./draft.sh -s -p 8059   # stop server on port 8059
+./draft.sh -r           # restart (stop then start on 8058)
+./draft.sh -r -p 8059   # restart on port 8059
 ```
 
-If port 8058 is already in use, `start.sh` will ask whether to restart (kill the existing process and start again). Logs go to `~/.draft/.draft-ui.log` (or `$DRAFT_HOME/.draft-ui.log`).
+If the port is already in use, `draft.sh` will ask whether to restart. Logs go to `~/.draft/.draft-ui.log` (or `$DRAFT_HOME/.draft-ui.log`).
 
 **Option B — foreground:** run the server in the terminal (stops when you Ctrl+C).
 
@@ -35,12 +39,27 @@ python scripts/serve.py -p 8059   # custom port
 
 ## Run Draft as a local Docker container
 
+Build and run with your existing config and sources (mount **`~/.draft`** so the container sees **sources.yaml**, **.doc_sources**, and **vault**):
+
 ```bash
 docker build -t draft-ui .
-docker run -p 8058:8058 draft-ui
+docker run -p 8058:8058 -v ~/.draft:/root/.draft draft-ui
 # Open http://localhost:8058
 ```
 
+Without the `-v ~/.draft:/root/.draft` mount, the container uses an empty data dir and will not see your **sources.yaml** or pulled docs. To also use your LLM config (e.g. Ollama or API keys), mount your repo’s **.env**. If Ollama runs on your **host** (not in Docker), set **`OLLAMA_HOST`** so the container can reach it (Docker Desktop provides `host.docker.internal`):
+
+```bash
+docker run -p 8058:8058 \
+  -v ~/.draft:/root/.draft \
+  -v /path/to/draft/repo/.env:/app/.env:ro \
+  -e OLLAMA_HOST=http://host.docker.internal:11434 \
+  draft-ui
+```
+
+Replace `/path/to/draft/repo` with your Draft repo path (e.g. the directory that contains `draft.sh`). Without `OLLAMA_HOST`, the app uses `localhost:11434` (the container’s own loopback), so Ollama on the host won’t be reachable.
+
+**Easiest:** run **`./setup.sh`** and choose **6) Run Draft in a Docker container** — it detects local vs cloud LLM, creates `.env.docker` when using Ollama, stops any running container, then starts a new one. Full details: [docs/docker-guide.md](docs/docker-guide.md).
 
 ## Where documents are stored (`~/.draft`)
 
@@ -97,9 +116,11 @@ For maximum privacy, use **Ollama** and keep **`HF_HUB_OFFLINE=1`** in **`.env`*
 
 3. **Walks you through adding sources** — you can add a local path or a GitHub repo URL. The script runs `pull.py -a` under the hood.
 
-4. **Configures the LLM for Ask (AI)** — if Ollama is installed, it can suggest the Qwen3 model set (embed + reranker) and offer presets: **G** (Gold: 8b embed + 0.6B reranker), **L** (8B+8B), **S** (0.6B+0.6B). Otherwise you can choose a cloud provider (Claude, Gemini, OpenAI) and enter an API key. Choices are written to **`.env`** in the repo root.
+4. **Configures the LLM for Ask (AI)** — if Ollama is installed, it can suggest the Qwen3 model set (embed + reranker) and offer presets: **G** (Gold: 8b embed + 0.6B reranker), **L** (8B+8B), **S** (0.6B+0.6B). Otherwise you can choose a cloud provider (Claude, Gemini, OpenAI) and enter an API key. Choices are written to **`.env`**. If you run Draft in Docker, restart the container (option 6) to pick up a new LLM.
 
 5. **Builds the RAG index** — after setup, it runs the AI index build once so Ask (AI) works immediately.
+
+6. **Run in Docker** — runs the `draft-ui` container with your data and LLM config; detects local vs cloud LLM, stops any existing container, then starts a new one. See [docs/docker-guide.md](docs/docker-guide.md).
 
 You can re-run **`./setup.sh`** anytime to add more sources or change the LLM. To tweak config by hand, edit **`.env`** (embed model, cross-encoder, LLM provider, API keys). See **`docs/RAG_operations.md`** for CLI commands (index build, ask, pipeline test).
 
@@ -117,6 +138,7 @@ The **`docs/`** folder contains design and operations docs you can use as refere
 | [Intelligence layer design](docs/intelligence-layer-design.md) | Embeddings, Chroma, LLM integration, RAG pipeline |
 | [RAG design principles](docs/RAG-design-principles.md) | RAG goals, architecture, chunking, citations, local vs cloud |
 | [RAG operations](docs/RAG_operations.md) | Default models, Qwen3 pairs (G/L/S), CLI: index build, ask, pipeline test |
+| [Docker guide](docs/docker-guide.md) | Run in Docker (option 6), OLLAMA_HOST, mounts, K8s plan |
 | [Local oracle design](docs/local-oracle-design.md) | When and how a local LLM is used for Ask (AI) |
 | [Testing suites](docs/testing-suites.md) | Test layers, pytest, pipeline test (`test_pipeline.py`), curl integration |
 

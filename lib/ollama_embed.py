@@ -2,10 +2,19 @@
 Ollama embedding and reranking API. Use local Ollama models instead of downloading from Hugging Face.
 """
 import json
+import os
 import urllib.request
 
 
-OLLAMA_BASE = "http://localhost:11434"
+def _ollama_base() -> str:
+    """Base URL for Ollama API. Use OLLAMA_HOST (e.g. host.docker.internal:11434) when running in Docker."""
+    raw = os.environ.get("OLLAMA_HOST", "localhost:11434").strip()
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw.rstrip("/")
+    return "http://" + raw
+
+
+OLLAMA_BASE = _ollama_base()
 
 
 def rerank(model: str, query: str, documents: list[str], top_n: int = 3) -> list[tuple[str, float]]:

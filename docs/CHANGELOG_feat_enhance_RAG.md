@@ -168,7 +168,7 @@ This branch adds cross-encoder reranking, Ollama-based embedding/reranking, a de
   - Added **Pipeline test** subsection: table of pairs (default, G, L, S), example commands, options (`-p`, `-q`, `--rebuild`, `--profile`, `-v`).
 
 - **README.md**
-  - **Start the UI:** Option A (daemon `start.sh`, port), Option B (foreground `serve.py`, port).
+  - **Start the UI:** Option A (daemon `draft.sh` with `-p` port, `-s` stop, `-r` restart), Option B (foreground `serve.py`, port).
   - **Privacy:** New section — Draft sets **`HF_HUB_OFFLINE=1`** in `.env` and in code; local LLM (Ollama) keeps everything on-device; cloud LLM is optional; recommendation to use Ollama + HF_HUB_OFFLINE for maximum privacy.
   - **Using setup.sh:** Five steps (environment, sources.yaml, add sources, configure LLM, build RAG index); mention of embed/cross-encoder and G/L/S; pointer to `docs/RAG_operations.md`.
   - **References:** Renamed from “Engineering”; table of design/operations docs (storage, core, design principles, intelligence layer, RAG design, **RAG operations**, local oracle, testing suites).
