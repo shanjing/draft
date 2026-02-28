@@ -258,9 +258,9 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     if mode not in INDEX_PROFILES:
         raise ValueError(f"Unknown index profile: {profile}. Use quick or deep.")
     cfg = dict(INDEX_PROFILES[mode])
-    # Env override for embedding model (set by setup.sh)
-    env_embed = os.environ.get("DRAFT_EMBED_MODEL", "").strip()
-    embed_provider = os.environ.get("DRAFT_EMBED_PROVIDER", "").strip().lower()
+    # Env override for embedding model (set by setup.sh). Strip quotes for Docker --env-file.
+    env_embed = os.environ.get("DRAFT_EMBED_MODEL", "").strip().strip("'\"")
+    embed_provider = os.environ.get("DRAFT_EMBED_PROVIDER", "").strip().strip("'\"").lower()
     if env_embed:
         cfg["embed_model"] = env_embed
         cfg["trust_remote_code"] = "nomic" in env_embed.lower() or "qwen" in env_embed.lower()

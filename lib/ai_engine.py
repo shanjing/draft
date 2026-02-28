@@ -78,8 +78,8 @@ CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 
 def _get_cross_encoder_model() -> str:
-    """Cross-encoder model name; DRAFT_CROSS_ENCODER_MODEL env overrides default."""
-    return os.environ.get("DRAFT_CROSS_ENCODER_MODEL", "").strip() or CROSS_ENCODER_MODEL
+    """Cross-encoder model name; DRAFT_CROSS_ENCODER_MODEL env overrides default. Strips quotes for Docker --env-file."""
+    return _env_strip("DRAFT_CROSS_ENCODER_MODEL", "") or CROSS_ENCODER_MODEL
 
 _CROSS_ENCODER_CACHE: dict[str, object] = {}
 
@@ -146,7 +146,7 @@ def rerank(query: str, chunks: list[dict], top_n: int = RERANK_TOP_N) -> list[di
     """
     if not chunks:
         return []
-    rerank_provider = (os.environ.get("DRAFT_RERANK_PROVIDER") or "").strip().lower()
+    rerank_provider = _env_strip("DRAFT_RERANK_PROVIDER", "").lower()
     model_name = _get_cross_encoder_model()
     if rerank_provider == "ollama":
         try:
@@ -456,10 +456,11 @@ def _stream_openai(user_content: str, api_key: str, model_override: str | None =
 def _stream_ollama(user_content: str, model_name: str | None = None):
     import urllib.request
     import json
+    from lib.ollama_embed import OLLAMA_BASE
     model = model_name or "qwen3:8b"
     try:
         req = urllib.request.Request(
-            "http://localhost:11434/api/generate",
+            f"{OLLAMA_BASE}/api/generate",
             data=json.dumps({
                 "model": model,
                 "prompt": f"{SYSTEM_PROMPT}\n\n{user_content}",
