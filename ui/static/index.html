@@ -41,6 +41,7 @@
         <button type="button" id="btn-pull" class="btn btn-small btn-primary btn-icon" title="Pull latest from managed repos" aria-label="Pull latest from managed repos"><span class="toolbar-btn-icon" aria-hidden="true">↻</span></button>
         <button type="button" id="btn-collapse" class="btn btn-small btn-icon" title="Collapse all folders" aria-label="Collapse all folders"><span class="toolbar-btn-icon" aria-hidden="true">▼</span></button>
         <button type="button" id="btn-expand" class="btn btn-small btn-icon" title="Expand all folders" aria-label="Expand all folders"><span class="toolbar-btn-icon" aria-hidden="true">▶</span></button>
+        <button type="button" id="btn-add-source-toggle" class="btn btn-small" title="Add a new source repo" aria-expanded="false">⊕ source</button>
       </div>
       <div id="pull-status" class="pull-status hidden"></div>
       <div id="system-console" class="system-console collapsed">
@@ -51,9 +52,11 @@
         </div>
         <div id="system-console-content" class="system-console-body"></div>
       </div>
-      <div class="add-source">
-        <label for="add-source-input" class="add-source-label">Add source</label>
-        <input type="text" id="add-source-input" class="add-source-input" placeholder="GitHub URL or local path" aria-label="Add source (GitHub URL or local path)" autocomplete="off">
+      <div class="add-source collapsed" id="add-source-section">
+        <div class="add-source-inner">
+          <label for="add-source-input" class="add-source-label">Add source</label>
+          <input type="text" id="add-source-input" class="add-source-input" placeholder="GitHub URL or local path" aria-label="Add source (GitHub URL or local path)" autocomplete="off">
+        </div>
       </div>
       <nav id="tree" class="tree" aria-label="Document tree"></nav>
     </aside>
@@ -71,11 +74,16 @@
             <label for="ask-query-input" class="ask-ai-label">Question (answered from your docs only). Press Enter to ask.</label>
             <textarea id="ask-query-input" class="ask-query-input" rows="2" placeholder="e.g. How do we set up X?" aria-label="Ask a question"></textarea>
             <div class="ask-ai-hint-row">
-              <p class="ask-hint">Index: <button type="button" id="ask-reindex" class="btn-link">Quick rebuild</button> / <button type="button" id="ask-reindex-deep" class="btn-link">Deep rebuild (nomic)</button></p>
               <h4 class="ask-models-heading" id="ask-models-toggle" role="button" tabindex="0" aria-expanded="false">Models <span class="ask-models-chevron" aria-hidden="true"></span></h4>
             </div>
             <div id="ask-models-wrap" class="ask-models-wrap ask-models-collapsed">
-              <div id="ask-models" class="ask-models" aria-live="polite"></div>
+              <div id="ask-models" class="ask-models" aria-live="polite">
+                <div class="ask-models-reindex">
+                  <button type="button" id="ask-reindex" class="btn-link">Quick rebuild</button>
+                  <span class="ask-models-sep">/</span>
+                  <button type="button" id="ask-reindex-deep" class="btn-link">Deep rebuild (nomic)</button>
+                </div>
+              </div>
             </div>
             <div id="ask-loading-dots" class="ask-loading-dots hidden" aria-hidden="true"><span class="ask-dot"></span><span class="ask-dot"></span><span class="ask-dot"></span></div>
             <div id="ask-answer" class="ask-answer hidden"></div>
