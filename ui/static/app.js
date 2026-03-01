@@ -26,6 +26,12 @@
     setTheme(getTheme() === 'bright' ? 'night' : 'bright');
   });
 
+  // Measure actual header height for sticky sidebar offset
+  (function () {
+    var h = document.querySelector('.header');
+    if (h) document.documentElement.style.setProperty('--header-h', h.offsetHeight + 'px');
+  })();
+
   var DOC_FONT_KEY = 'draft-doc-font';
   var DOC_THEME_KEY = 'draft-doc-theme';
   var DOC_FONT_SIZE_KEY = 'draft-doc-font-size';
@@ -154,17 +160,8 @@
   function applyDocReaderLinesToPanes(n) {
     var lines = n !== undefined ? n : getDocReaderLines();
     var val = String(lines);
+    // Set CSS variable for code pad max-height (doc-reader-window no longer has fixed height)
     if (contentEl) contentEl.style.setProperty('--doc-reader-lines', val);
-    var heightVal = (lines * DOC_READER_LINE_HEIGHT_EM) + 'em';
-    [1, 2].forEach(function (tab) {
-      var el = document.getElementById('doc-reader-window-' + tab);
-      if (el) {
-        el.style.setProperty('--doc-reader-lines', val);
-        el.style.flex = 'none';
-        el.style.height = heightVal;
-        el.style.maxHeight = heightVal;
-      }
-    });
   }
   function applyDocReaderLines() {
     applyDocReaderLinesToPanes(getDocReaderLines());
@@ -1047,6 +1044,20 @@
       .catch(function () {});
   }
 
+  (function initAddSourceToggle() {
+    var toggle = document.getElementById('btn-add-source-toggle');
+    var section = document.getElementById('add-source-section');
+    if (!toggle || !section) return;
+    toggle.addEventListener('click', function () {
+      var collapsed = section.classList.toggle('collapsed');
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      if (!collapsed) {
+        var inp = document.getElementById('add-source-input');
+        if (inp) inp.focus();
+      }
+    });
+  })();
+
   (function initAddSource() {
     var input = document.getElementById('add-source-input');
     if (!input) return;
@@ -1379,8 +1390,6 @@
     var docEl = getDocEl(activeTab);
     if (!docEl) return;
     var codeWindow = docEl.querySelector('.doc-code-pad-window');
-    var container = codeWindow || docEl.closest('.doc-reader-window');
-    if (!container) return;
     var pre = docEl.querySelector('.doc-code-pad-window pre, pre');
     var lineHeight = 22;
     if (pre) {
@@ -1389,10 +1398,20 @@
       var lh = style.lineHeight;
       if (lh && lh !== 'normal') lineHeight = parseFloat(lh); else lineHeight = fs * 1.5;
     }
-    var scrollTop = Math.max(0, (line - 1) * lineHeight - 20);
-    requestAnimationFrame(function () {
-      if (container) container.scrollTop = scrollTop;
-    });
+    var offset = Math.max(0, (line - 1) * lineHeight - 20);
+    if (codeWindow) {
+      // Code pad: scroll within fixed-height container
+      requestAnimationFrame(function () { codeWindow.scrollTop = offset; });
+    } else {
+      // Markdown doc: scroll browser window to line position
+      var readerWindow = document.getElementById('doc-reader-window-' + activeTab);
+      if (readerWindow) {
+        requestAnimationFrame(function () {
+          var rect = readerWindow.getBoundingClientRect();
+          window.scrollTo({ top: window.scrollY + rect.top + offset, behavior: 'smooth' });
+        });
+      }
+    }
   }
 
   function loadDoc(repo, path, sourceType) {
