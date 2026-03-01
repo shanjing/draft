@@ -26,8 +26,11 @@
         <p class="tagline">Your personal knowledge base</p>
         <div class="header-switches">
           <button type="button" id="theme-switch" class="theme-switch" role="switch" aria-label="Toggle bright theme" title="Night / Bright"><span class="theme-switch-thumb"></span></button>
+          <button type="button" id="bg-picker-btn" class="btn-bg-picker" title="Change background image" aria-label="Change background image" aria-expanded="false"><span aria-hidden="true">🖼</span></button>
+          <button type="button" id="btn-refresh-page" class="btn-bg-picker" title="Reload page" aria-label="Reload page"><span aria-hidden="true">↻</span></button>
         </div>
       </div>
+      <div id="bg-picker-dropdown" class="bg-picker-dropdown hidden" role="listbox" aria-label="Background images"></div>
     </div>
     <div class="header-right search-wrap">
       <input type="search" id="search-input" class="search-input hidden" placeholder="Search documents (full text)…" aria-label="Search documents">

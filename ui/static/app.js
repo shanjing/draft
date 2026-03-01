@@ -26,6 +26,93 @@
     setTheme(getTheme() === 'bright' ? 'night' : 'bright');
   });
 
+  var BG_KEY = 'draft-bg-image';
+  var BG_IMAGES = [
+    { name: 'draft-bg',            file: 'draft-bg.jpg',            label: 'Chalk',          size: 'auto',  repeat: 'repeat' },
+    { name: 'draft-bg-bright',     file: 'draft-bg-bright.jpg',     label: 'Sketch',         size: 'auto',  repeat: 'repeat' },
+    { name: 'background_1_dark',   file: 'background_1_dark.jpg',   label: 'Dark texture',   size: 'cover', repeat: 'no-repeat' },
+    { name: 'background_1_bright', file: 'background_1_bright.jpg', label: 'Bright texture', size: 'cover', repeat: 'no-repeat' },
+    { name: 'abstract_earth',      file: 'abstract_earth.jpg',      label: 'Abstract earth', size: 'cover', repeat: 'no-repeat' },
+    { name: 'background_2',        file: 'background_2.jpg',        label: 'Watercolor',     size: 'cover', repeat: 'no-repeat' },
+    { name: 'blug_night_sky',      file: 'blug_night_sky.jpg',      label: 'Night sky',      size: 'cover', repeat: 'no-repeat' },
+    { name: 'bluish-paint',        file: 'bluish-paint.jpg',        label: 'Bluish paint',   size: 'cover', repeat: 'no-repeat' },
+    { name: 'none',                file: null,                      label: 'None',           size: 'auto',  repeat: 'no-repeat' },
+  ];
+  function getBg() {
+    try { return localStorage.getItem(BG_KEY) || 'draft-bg'; } catch (e) { return 'draft-bg'; }
+  }
+  function setBg(name) {
+    var bg = BG_IMAGES.find(function (b) { return b.name === name; }) || BG_IMAGES[0];
+    var root = document.documentElement;
+    if (bg.file) {
+      root.style.setProperty('--bg-image', 'url(/assets/' + bg.file + ')');
+    } else {
+      root.style.setProperty('--bg-image', 'none');
+    }
+    root.style.setProperty('--bg-size', bg.size || 'auto');
+    root.style.setProperty('--bg-repeat', bg.repeat || 'repeat');
+    try { localStorage.setItem(BG_KEY, name); } catch (e) {}
+    document.querySelectorAll('.bg-thumb').forEach(function (el) {
+      el.classList.toggle('active', el.dataset.bg === name);
+    });
+  }
+  (function initBgPicker() {
+    var btn = document.getElementById('bg-picker-btn');
+    var dropdown = document.getElementById('bg-picker-dropdown');
+    if (!btn || !dropdown) return;
+    BG_IMAGES.forEach(function (bg) {
+      var thumb = document.createElement('div');
+      thumb.className = 'bg-thumb';
+      thumb.dataset.bg = bg.name;
+      thumb.setAttribute('role', 'option');
+      thumb.setAttribute('aria-label', bg.label);
+      if (bg.file) {
+        var img = document.createElement('img');
+        img.src = '/assets/' + bg.file;
+        img.alt = bg.label;
+        img.loading = 'lazy';
+        thumb.appendChild(img);
+      } else {
+        var none = document.createElement('div');
+        none.className = 'bg-thumb-none';
+        none.textContent = 'None';
+        thumb.appendChild(none);
+      }
+      var lbl = document.createElement('div');
+      lbl.className = 'bg-thumb-label';
+      lbl.textContent = bg.label;
+      thumb.appendChild(lbl);
+      thumb.addEventListener('click', function () {
+        setBg(bg.name);
+        dropdown.classList.add('hidden');
+        btn.setAttribute('aria-expanded', 'false');
+      });
+      dropdown.appendChild(thumb);
+    });
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var hidden = dropdown.classList.toggle('hidden');
+      btn.setAttribute('aria-expanded', String(!hidden));
+      if (!hidden) {
+        var current = getBg();
+        dropdown.querySelectorAll('.bg-thumb').forEach(function (el) {
+          el.classList.toggle('active', el.dataset.bg === current);
+        });
+      }
+    });
+    document.addEventListener('click', function (e) {
+      if (!dropdown.classList.contains('hidden') && !dropdown.contains(e.target) && e.target !== btn) {
+        dropdown.classList.add('hidden');
+        btn.setAttribute('aria-expanded', 'false');
+      }
+    });
+    setBg(getBg());
+  })();
+
+  document.getElementById('btn-refresh-page') && document.getElementById('btn-refresh-page').addEventListener('click', function () {
+    location.reload();
+  });
+
   // Measure actual header height for sticky sidebar offset
   (function () {
     var h = document.querySelector('.header');
