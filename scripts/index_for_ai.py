@@ -49,7 +49,10 @@ def main(profile: str, verbose: bool) -> None:
     cfg = INDEX_PROFILES.get(mode, INDEX_PROFILES["quick"])
     if verbose:
         configure_cli()
-        click.echo(f"embed_model: {cfg['embed_model']}")
+        # Show effective embed model (env overrides profile default)
+        env_embed = os.environ.get("DRAFT_EMBED_MODEL", "").strip().strip("'\"")
+        effective_embed = env_embed or cfg["embed_model"]
+        click.echo(f"embed_model: {effective_embed}")
     n = build_index(DRAFT_ROOT, verbose=verbose, profile=profile)
     click.echo(f"Indexed {n} chunks.")
 

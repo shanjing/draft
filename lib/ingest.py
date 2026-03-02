@@ -25,7 +25,6 @@ from lib.chunking import chunk_markdown, chunk_python, Chunk
 from lib.gitignore import get_git_ignored_set
 from lib.log import get_logger
 from lib.manifest import parse_sources_yaml
-from lib.ollama_embed import embed as ollama_embed, is_ollama_embed_model as _is_ollama_embed_model
 from lib.paths import get_effective_repo_root, get_sources_yaml_path, get_vault_root
 
 log = get_logger(__name__)
@@ -258,17 +257,13 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     if mode not in INDEX_PROFILES:
         raise ValueError(f"Unknown index profile: {profile}. Use quick or deep.")
     cfg = dict(INDEX_PROFILES[mode])
-    # Env override for embedding model (set by setup.sh). Strip quotes for Docker --env-file.
+    # Env override for embedding model and provider (set by setup.sh step 2). .env is source of truth.
     env_embed = os.environ.get("DRAFT_EMBED_MODEL", "").strip().strip("'\"")
-    embed_provider = os.environ.get("DRAFT_EMBED_PROVIDER", "").strip().strip("'\"").lower()
+    env_embed_provider = (os.environ.get("DRAFT_EMBED_PROVIDER", "") or "").strip().lower()
     if env_embed:
         cfg["embed_model"] = env_embed
         cfg["trust_remote_code"] = "nomic" in env_embed.lower() or "qwen" in env_embed.lower()
-    use_ollama_embed = embed_provider == "ollama" or (
-        env_embed and _is_ollama_embed_model(env_embed)
-    )
-    if use_ollama_embed:
-        cfg["embed_provider"] = "ollama"
+    use_ollama_embed = env_embed_provider == "ollama"
 
     chunks = collect_chunks(
         draft_root,
@@ -292,7 +287,7 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
         client.delete_collection(COLLECTION_NAME)
     except Exception:
         pass
-    embed_provider = cfg.get("embed_provider", "")
+    embed_provider = "ollama" if use_ollama_embed else "hf"
     collection = client.create_collection(
         COLLECTION_NAME,
         metadata={
@@ -307,7 +302,7 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     )
 
     if verbose:
-        log.info(f"Embedding {len(chunks)} chunks with {cfg['embed_model']} ({mode})...")
+        log.info(f"Embedding {len(chunks)} chunks with {cfg['embed_model']} ({embed_provider}, {mode})...")
     BATCH_SIZE = int(cfg["batch_size"])
     EMBED_BATCH_SIZE = int(cfg["embed_batch_size"])
     starts = range(0, len(chunks), BATCH_SIZE)
@@ -316,16 +311,15 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
         pbar = tqdm(total=len(chunks), desc="Build RAG/vector index", unit="chunk", leave=True)
 
     if use_ollama_embed:
-        # Use Ollama API (no download); model already in Ollama
+        from lib.ollama_embed import embed as ollama_embed
         ollama_model = str(cfg["embed_model"])
-        if verbose:
-            log.info(f"Using Ollama embed: {ollama_model}")
         for start in starts:
             end = min(start + BATCH_SIZE, len(chunks))
             batch = chunks[start:end]
             texts = [c.text for c in batch]
             embeddings = ollama_embed(ollama_model, texts, batch_size=EMBED_BATCH_SIZE)
-            emb_list = [e if isinstance(e, list) else e.tolist() for e in embeddings]
+            if start == 0 and verbose and embeddings:
+                log.info(f"Embedding dimension: {len(embeddings[0])} ({ollama_model})")
             ids = [f"chunk_{i}" for i in range(start, end)]
             metadatas = []
             for c in batch:
@@ -338,13 +332,17 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
                     meta["start_line"] = c.start_line
                     meta["end_line"] = c.end_line
                 metadatas.append(meta)
-            collection.add(ids=ids, embeddings=emb_list, metadatas=metadatas, documents=texts)
+            collection.add(
+                ids=ids,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                documents=texts,
+            )
             if pbar is not None:
                 pbar.update(len(batch))
             elif verbose:
                 log.info(f"  Added {end}/{len(chunks)} chunks...")
     else:
-        # Use sentence-transformers (downloads from Hugging Face)
         with contextlib.redirect_stdout(io.StringIO()):
             model = SentenceTransformer(
                 str(cfg["embed_model"]),

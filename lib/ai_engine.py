@@ -142,36 +142,12 @@ def _get_cross_encoder(model_name: str | None = None):
 
 def rerank(query: str, chunks: list[dict], top_n: int = RERANK_TOP_N) -> list[dict]:
     """
-    Rerank chunks using cross-encoder or Ollama. Returns top_n chunks with "score" attached.
+    Rerank chunks using Hugging Face cross-encoder only. Returns top_n chunks with "score" attached.
     """
     if not chunks:
         return []
-    rerank_provider = _env_strip("DRAFT_RERANK_PROVIDER", "").lower()
     model_name = _get_cross_encoder_model()
-    if rerank_provider == "ollama":
-        try:
-            from lib.ollama_embed import rerank as ollama_rerank
-            docs = [c.get("text", "") or "" for c in chunks]
-            results = ollama_rerank(model_name, query, docs, top_n=top_n)
-            text_to_chunk = {c.get("text", "") or "": c for c in chunks}
-            out = []
-            for doc, score in results:
-                c = text_to_chunk.get(doc)
-                if c is not None:
-                    item = dict(c)
-                    item["score"] = round(float(score), 4)
-                    out.append(item)
-            return out
-        except Exception as e:
-            log.warning(f"Ollama rerank failed ({e}), skipping rerank (no HF fallback)")
-            # Return top_n chunks in order, with placeholder score; avoids HF download
-            out = []
-            for i, c in enumerate(chunks[:top_n]):
-                item = dict(c)
-                item["score"] = 1.0 - (i * 0.001)
-                out.append(item)
-            return out
-    # HF CrossEncoder: strip Ollama :tag from model name (e.g. dengcao/Qwen3-Reranker-0.6B:Q8_0 -> dengcao/Qwen3-Reranker-0.6B)
+    # HF CrossEncoder: strip :tag from model name if present
     hf_model = model_name.split(":")[0] if ":" in model_name else model_name
     model = _get_cross_encoder(hf_model)
     pairs = [(query, c.get("text", "") or "") for c in chunks]
@@ -199,17 +175,7 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
     embed_provider = (meta.get("embed_provider") or "").strip().lower()
     trust_remote_code = _coerce_bool(meta.get("trust_remote_code"), TRUST_REMOTE_CODE)
 
-    def _query_with_ollama(model_name: str):
-        from lib.ollama_embed import embed as ollama_embed
-        embs = ollama_embed(model_name, [query], batch_size=1)
-        q_emb = embs[0] if embs else []
-        return coll.query(
-            query_embeddings=[q_emb],
-            n_results=min(top_k, 20),
-            include=["metadatas", "documents"],
-        )
-
-    def _query_with(model_name: str, trust: bool):
+    def _query_with_hf(model_name: str, trust: bool):
         model = _get_embedding_model(model_name, trust)
         q_emb = model.encode([query], show_progress_bar=False)
         return coll.query(
@@ -218,16 +184,27 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
             include=["metadatas", "documents"],
         )
 
+    def _query_with_ollama(ollama_model: str):
+        from lib.ollama_embed import embed as ollama_embed
+        q_embs = ollama_embed(ollama_model, [query], batch_size=1)
+        if not q_embs:
+            return {"metadatas": [[]], "documents": [[]]}
+        return coll.query(
+            query_embeddings=[q_embs[0]],
+            n_results=min(top_k, 20),
+            include=["metadatas", "documents"],
+        )
+
     try:
         if embed_provider == "ollama":
             result = _query_with_ollama(embed_model)
         else:
-            result = _query_with(embed_model, trust_remote_code)
+            result = _query_with_hf(embed_model, trust_remote_code)
     except Exception as e:
         msg = str(e)
         # Backward-compat: old collections may be quick-built but missing metadata.
         if "Embedding dimension" in msg and "collection dimensionality" in msg and embed_model != "sentence-transformers/all-MiniLM-L6-v2":
-            result = _query_with("sentence-transformers/all-MiniLM-L6-v2", False)
+            result = _query_with_hf("sentence-transformers/all-MiniLM-L6-v2", False)
         else:
             raise
     out = []
@@ -304,11 +281,12 @@ def _build_citations(draft_root: Path, chunks: list[dict]) -> list[dict]:
     return citations
 
 #the entry point for RAG retrieval and LLM processing
-def ask_stream(draft_root: Path, query: str, *, debug: bool = False):
+def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt: bool = False):
     """
     Retrieve top-k chunks, rerank with cross-encoder to top-n, call LLM, stream response.
-    Yields: ("models", dict), ("text", str), ("citations", list), ("error", str).
+    Yields: ("models", dict), ("prompt", dict) if show_prompt, ("text", str), ("citations", list), ("error", str).
     When debug=True, logs embed_model, cross_encoder_model, retrieval count, and rerank scores.
+    When show_prompt=True, yields ("prompt", {"system": str, "user": str}) with the final prompt before calling the LLM.
     """
     # Use same HF cache as ingest for cross-encoder
     hf_cache = draft_root / ".cache" / "huggingface"
@@ -372,6 +350,9 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False):
 
     context = _build_context(chunks)
     user_content = f"Context from documentation:\n\n{context}\n\n---\n\nQuestion: {query}"
+
+    if show_prompt:
+        yield ("prompt", {"system": SYSTEM_PROMPT, "user": user_content})
 
     if provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
         api_key = _env_strip("ANTHROPIC_API_KEY")

@@ -1,47 +1,20 @@
 # RAG Operations
 
-How to build the RAG index, ask questions, and run end-to-end tests. Includes model choices (defaults and Qwen3 pairs G/L/S).
+How to build the RAG index, ask questions, and run end-to-end tests. Embed and encoder models are configured in setup and stored in `.env`; option 4 (Build RAG index) uses whatever `.env` has.
 
 ---
 
 ## Default models
 
-Index profiles control embedding model and chunking. The reranker (cross-encoder) is shared unless overridden.
+| Role | Default |
+|------|---------|
+| **Embed** | `sentence-transformers/all-MiniLM-L6-v2` (Hugging Face) |
+| **Encoder (reranker)** | `cross-encoder/ms-marco-MiniLM-L-6-v2` (Hugging Face only) |
 
-| Profile | Embedding model | Reranker |
-|---------|-----------------|----------|
-| **quick** | `sentence-transformers/all-MiniLM-L6-v2` | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
-| **deep** | `nomic-ai/nomic-embed-text-v1.5` | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+- **Encoder is always Hugging Face** (cross-encoder). Reranking does not use Ollama.
+- **Embed** can be Hugging Face or Ollama. If you use an Ollama embed model (e.g. `qwen3-embedding:8b`), set `DRAFT_EMBED_PROVIDER=ollama` in `.env` (setup step 2 does this when you enter a model name without a `/`).
 
-- **quick** — Faster indexing, smaller chunks (1600 chars).
-- **deep** — Higher quality, larger chunks (2400 chars), requires `trust_remote_code` for nomic.
-
-Override via `.env`: `DRAFT_EMBED_MODEL`, `DRAFT_CROSS_ENCODER_MODEL`.
-
-Note: for most Macbooks, Mac Mini and PCs, use this set of default model.
-
----
-
-## Qwen3 pairs (G, L, S)
-
-When using **Ollama** with all four Qwen3 models installed, you can choose from three preset pairs. No Hugging Face download.
-
-**Four Qwen3 models:**
-
-| Role | 8B | 0.6B |
-|------|----|------|
-| **Embedding** | `qwen3-embedding:8b` | `qwen3-embedding:0.6b` |
-| **Reranker** | `dengcao/Qwen3-Reranker-8B:Q3_K_M` | `dengcao/Qwen3-Reranker-0.6B:Q8_0` |
-
-**Preset pairs:**
-
-| Choice | Embed | Reranker | Use case |
-|--------|-------|----------|----------|
-| **G (Gold)** | 8B | 0.6B | Best balance: strong retrieval, fast rerank |
-| **L (8B+8B)** | 8B | 8B | Highest quality, slower |
-| **S (0.6B+0.6B)** | 0.6B | 0.6B | Fastest, lowest resource use |
-
-Setup (`./setup.sh`) detects when all four are present and offers G/L/S. Set `DRAFT_EMBED_PROVIDER=ollama` and `DRAFT_RERANK_PROVIDER=ollama` in `.env` when using these.
+Index profiles (quick/deep) control chunking and batch sizes; the embed/encoder model names come from `.env` (`DRAFT_EMBED_MODEL`, `DRAFT_CROSS_ENCODER_MODEL`). `.env` is the source of truth for these two models globally.
 
 ---
 
@@ -53,9 +26,11 @@ Setup (`./setup.sh`) detects when all four are present and offers G/L/S. Set `DR
 python scripts/index_for_ai.py [--profile quick|deep] [-v]
 ```
 
-- `--profile quick` — Default; faster indexing.
-- `--profile deep` — Higher quality (nomic embed, larger chunks).
-- `-v` / `--verbose` — Show embed model and progress.
+Uses **embed and encoder from `.env`** (set by setup step 2). Option 4 in setup (“Build RAG/index”) runs this with the same .env.
+
+- `--profile quick` — Default; faster indexing, smaller chunks.
+- `--profile deep` — Larger chunks; embed model still from `.env`.
+- `-v` / `--verbose` — Show embed model, provider, and progress.
 
 Examples:
 
@@ -94,7 +69,7 @@ Runs retrieval + rerank over the **existing index** (no rebuild by default). Sam
 
 | Option | Description |
 |--------|-------------|
-| `-p` / `--pair` | Model pair: default/d (sentence-transformers), G (Gold), L (8B+8B), S (0.6B+0.6B). Default: `default`. |
+| `-p` / `--pair` | Legacy: default/d (uses .env), G/L/S (overrides for tests). Default: `default`. |
 | `-q` / `--query` | Question to ask (default: "What is this project about?") |
 | `--rebuild` | Rebuild index from sources.yaml before retrieval (default: use existing index) |
 | `--profile quick\|deep` | Index profile when building (default: quick) |
@@ -103,18 +78,11 @@ Runs retrieval + rerank over the **existing index** (no rebuild by default). Sam
 Examples:
 
 ```bash
-# Use existing index, default pair (sentence-transformers)
+# Use existing index (embed/encoder from .env)
 python tests/test_pipeline.py -q "what is vault" -v
 
-# Gold pair (Ollama, no HF download)
-python tests/test_pipeline.py -p G -q "what is vault" -v
-
-# 8B+8B or 0.6B+0.6B
-python tests/test_pipeline.py -p L -q "what is vault" -v
-python tests/test_pipeline.py -p S -q "what is vault" -v
-
-# Rebuild index then run retrieval
-python tests/test_pipeline.py -p G --rebuild -q "what is vault" -v
+# Rebuild index then run retrieval (uses .env for embed model)
+python tests/test_pipeline.py --rebuild -q "what is vault" -v
 ```
 
 Run from the draft repo root.
