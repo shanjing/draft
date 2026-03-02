@@ -39,7 +39,8 @@ from lib.log import configure_cli
 @click.command(help="Ask a question over your draft docs (RAG).")
 @click.option("-q", "--query", required=True, help="Question to ask.")
 @click.option("--debug", is_flag=True, help="Log embed_model, cross-encoder, and rerank scores.")
-def main(query: str, debug: bool) -> None:
+@click.option("--show-prompt", is_flag=True, help="Print the final prompt (system + user) sent to the LLM after encoding and reranking.")
+def main(query: str, debug: bool, show_prompt: bool) -> None:
     if not query.strip():
         click.echo("Error: query cannot be empty.", err=True)
         sys.exit(1)
@@ -55,7 +56,7 @@ def main(query: str, debug: bool) -> None:
     citations = []
     error_msg = None
 
-    for kind, payload in ask_stream(DRAFT_ROOT, query.strip(), debug=debug):
+    for kind, payload in ask_stream(DRAFT_ROOT, query.strip(), debug=debug, show_prompt=show_prompt):
         if kind == "models":
             click.echo("Models: embed=%s, encoder=%s, LLM=%s" % (
                 payload.get("embed_model", "?"),
@@ -63,6 +64,11 @@ def main(query: str, debug: bool) -> None:
                 payload.get("llm_model", "?"),
             ))
             click.echo()
+        elif kind == "prompt":
+            click.echo("--- Final prompt to LLM ---")
+            click.echo("\n[System]\n%s" % (payload.get("system", ""),))
+            click.echo("\n[User]\n%s" % (payload.get("user", ""),))
+            click.echo("\n---\n")
         elif kind == "text":
             full_text += payload
         elif kind == "citations":

@@ -63,10 +63,9 @@ def _set_pair_env(pair: str, profile: str = "quick") -> tuple[str, str, bool]:
     os.environ["DRAFT_CROSS_ENCODER_MODEL"] = reranker
     if use_ollama:
         os.environ["DRAFT_EMBED_PROVIDER"] = "ollama"
-        os.environ["DRAFT_RERANK_PROVIDER"] = "ollama"
     else:
         os.environ.pop("DRAFT_EMBED_PROVIDER", None)
-        os.environ.pop("DRAFT_RERANK_PROVIDER", None)
+    os.environ.pop("DRAFT_RERANK_PROVIDER", None)
     return embed, reranker, use_ollama
 
 
