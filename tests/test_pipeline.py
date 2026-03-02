@@ -23,10 +23,11 @@ DRAFT_ROOT = SCRIPT_DIR.parent
 # Ensure lib is importable
 sys.path.insert(0, str(DRAFT_ROOT))
 
-# Use project-local cache for HuggingFace/sentence-transformers
-_cache = DRAFT_ROOT / ".cache" / "huggingface"
+# HF cache under DRAFT_HOME (tests set DRAFT_HOME to temp dir)
+from lib.paths import get_hf_cache_root
+_cache = get_hf_cache_root()
 _cache.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("HF_HOME", str(_cache))
+os.environ["HF_HOME"] = str(_cache)
 
 # Load .env (override=False so explicit env vars in main() take precedence)
 try:

@@ -29,6 +29,7 @@ Six source types are recognized. The `source_type` field in `draft_config.json` 
 │   └── <name>/
 ├── .x_posts/             # fetched X/Twitter post content (future)
 │   └── <name>/
+├── .cache/huggingface/   # HF embed/encoder models (checked before download)
 ├── .search_index/        # Whoosh FTS index (derived; rebuildable)
 └── .vector_store/        # ChromaDB vector index (derived; rebuildable)
 ```

@@ -76,7 +76,7 @@ class TestLLMStatus:
         data = r.json()
         assert "provider" in data
         assert "model" in data
-        assert data["provider"] in ("ollama", "claude", "gemini", "openai", "")
+        assert data["provider"] in ("ollama", "claude", "gemini", "openai", "endpoint", "")
         assert isinstance(data["model"], str)
 
 

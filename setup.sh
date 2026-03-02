@@ -24,6 +24,7 @@ VIRTUAL_ENV="$SCRIPT_DIR/.venv" . "$SCRIPT_DIR/scripts/draft_banner.sh" 2>/dev/n
 # Colors (MarginCall-style)
 R='\033[0;31m'
 G='\033[0;32m'
+Y='\033[1;33m'
 D='\033[0;90m'
 N='\033[0m'
 
@@ -303,6 +304,64 @@ check_sources_consistency() {
   fi
 }
 
+# Show Actions (required/suggested/None) in yellow. Called after consistency check.
+# Uses RAG index (Chroma) value as baseline; if current configured model differs, [required] rebuild.
+show_actions() {
+  local baseline_embed current_embed has_required=0 has_suggested=0
+  # Baseline = what the index was built with (same as "RAG index:" in current state)
+  baseline_embed=""
+  if [ -d "$DRAFT_HOME/.vector_store" ] && [ -n "$(find "$DRAFT_HOME/.vector_store" -type f 2>/dev/null | head -1)" ]; then
+    baseline_embed=$(cd "$SCRIPT_DIR" && "$PYTHON" -c "
+import sys
+sys.path.insert(0, '.')
+try:
+    import chromadb
+    from chromadb.config import Settings
+    from lib.paths import get_vector_store_root
+    from lib.ingest import COLLECTION_NAME
+    client = chromadb.PersistentClient(path=str(get_vector_store_root()), settings=Settings(anonymized_telemetry=False))
+    col = client.get_collection(COLLECTION_NAME)
+    meta = getattr(col, 'metadata', None) or {}
+    print(meta.get('embed_model') or meta.get('profile', '') or '')
+except Exception:
+    print('')
+" 2>/dev/null) || true
+  fi
+  # Current model = what would be used for next build (same as "Embed:" in current state)
+  current_embed="$(env_val "DRAFT_EMBED_MODEL" "$DEFAULT_EMBED_MODEL")"
+  [ -z "$current_embed" ] && current_embed="$DEFAULT_EMBED_MODEL"
+  printf "${D}Actions:${N}\n"
+  if [ -n "$baseline_embed" ] && [ "$current_embed" != "$baseline_embed" ]; then
+    printf "  ${Y}[required] Rebuild the index with the new model in step 5 (Build RAG/index).${N}\n"
+    printf "  ${Y}[reason] The current Embed model is %s does not match RAG index (%s).${N}\n" "$current_embed" "$baseline_embed"
+    has_required=1
+  fi
+  # Suggest build when no index AND (doc_sources or vault has indexable content)
+  if [ -z "$baseline_embed" ]; then
+    _has_content=0
+    [ -d "$DRAFT_HOME/.doc_sources" ] && [ -n "$(find "$DRAFT_HOME/.doc_sources" -mindepth 2 -type f 2>/dev/null | head -1)" ] && _has_content=1
+    [ -d "$DRAFT_HOME/vault" ] && [ -n "$(find "$DRAFT_HOME/vault" -type f 2>/dev/null | head -1)" ] && _has_content=1
+    if [ "$_has_content" -eq 1 ]; then
+      printf "  ${Y}[suggested] Build the RAG index in step 5 (Build RAG/index).${N}\n"
+      has_suggested=1
+    fi
+    unset _has_content
+  fi
+  if [ -f "$SCRIPT_DIR/.env" ]; then
+    _lp=$(grep -E '^[[:space:]]*DRAFT_LLM_PROVIDER[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+    _lm=$(grep -E '^[[:space:]]*OLLAMA_MODEL[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+    [ -z "$_lm" ] && _lm=$(grep -E '^[[:space:]]*DRAFT_LLM_MODEL[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+    if [ -z "$_lp" ] && [ -z "$_lm" ] && [ -z "$(grep -E '^[[:space:]]*ANTHROPIC_API_KEY[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null)" ] && [ -z "$(grep -E '^[[:space:]]*GEMINI_API_KEY[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null)" ] && [ -z "$(grep -E '^[[:space:]]*OPENAI_API_KEY[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null)" ]; then
+      printf "  ${Y}[suggested] Configure LLM in step 4 (Configure LLM).${N}\n"
+      has_suggested=1
+    fi
+    unset _lp _lm
+  fi
+  if [ "$has_required" = "0" ] && [ "$has_suggested" = "0" ]; then
+    printf "  ${Y}[None] You are good to go.${N}\n"
+  fi
+}
+
 # Show current state for existing install: sources, vault file count, LLM config.
 show_current_state() {
   printf "${D}--- Current state ---${N}\n"
@@ -330,15 +389,16 @@ show_current_state() {
     [ -n "$_cross" ] && printf "  ${D}Cross-encoder: %s${N}\n" "$_cross"
     unset _emb _cross
   fi
-  if [ -d "$SCRIPT_DIR/.vector_store" ] && [ -n "$(find "$SCRIPT_DIR/.vector_store" -type f 2>/dev/null | head -1)" ]; then
+  if [ -d "$DRAFT_HOME/.vector_store" ] && [ -n "$(find "$DRAFT_HOME/.vector_store" -type f 2>/dev/null | head -1)" ]; then
     _rag_model=$(cd "$SCRIPT_DIR" && "$PYTHON" -c "
 import sys
 sys.path.insert(0, '.')
 try:
     import chromadb
     from chromadb.config import Settings
-    from lib.ingest import VECTOR_DIR, COLLECTION_NAME
-    client = chromadb.PersistentClient(path=VECTOR_DIR, settings=Settings(anonymized_telemetry=False))
+    from lib.paths import get_vector_store_root
+    from lib.ingest import COLLECTION_NAME
+    client = chromadb.PersistentClient(path=str(get_vector_store_root()), settings=Settings(anonymized_telemetry=False))
     col = client.get_collection(COLLECTION_NAME)
     meta = getattr(col, 'metadata', None) or {}
     # Prefer embed model name (algorithm); fall back to profile for old index
@@ -436,14 +496,52 @@ env_val() {
   fi
 }
 
-# Option 2: Setup embedding model. List: default (sentence-transformers) + local Ollama embed models.
+# One-liner feature for known embed models
+embed_model_feature() {
+  case "$1" in
+    sentence-transformers/all-MiniLM-L6-v2)
+      printf "Fast, small, good for most use cases"
+      ;;
+    BAAI/bge-small-en-v1.5)
+      printf "Small, strong quality for English"
+      ;;
+    nomic-ai/nomic-embed-text-v1.5)
+      printf "Higher quality, longer context"
+      ;;
+    mixedbread-ai/mxbai-embed-large-v1)
+      printf "Strong MTEB performance, 1024 dims"
+      ;;
+    *)
+      if printf '%s' "$1" | grep -q '/'; then
+        printf "Hugging Face model"
+      else
+        printf "Ollama model"
+      fi
+      ;;
+  esac
+}
+
+# Option 2: Setup embedding model. Show current, suggest 3 HF models, list local Ollama, allow custom HF input.
 do_config_embed_flow() {
   local current_encoder
   current_encoder="$(env_val "DRAFT_CROSS_ENCODER_MODEL" "$DEFAULT_CROSS_ENCODER_MODEL")"
   [ -z "$current_encoder" ] && current_encoder="$DEFAULT_CROSS_ENCODER_MODEL"
 
+  # Save current embed model from .env before any change (for compare-after-write)
+  local prev_embed
+  prev_embed="$(env_val "DRAFT_EMBED_MODEL" "$DEFAULT_EMBED_MODEL")"
+  [ -z "$prev_embed" ] && prev_embed="$DEFAULT_EMBED_MODEL"
+
   printf "\n${D}--- Setup embedding model ---${N}\n"
-  printf "  1) %s (default)\n" "$DEFAULT_EMBED_MODEL"
+  printf "  ${G}[Current]${N} %s — %s\n" "$prev_embed" "$(embed_model_feature "$prev_embed")"
+  echo ""
+  printf "  N) No change (use current model) [default]\n"
+  printf "  ${D}Suggested Hugging Face models: ${Y}[all HF models will be downloaded and run locally for privacy]${N}\n"
+  printf "  ${D}16GB laptop (no GPU): prefer 1 or nomic-ai/nomic-embed-text-v1.5.${N}\n"
+  printf "  1) sentence-transformers/all-MiniLM-L6-v2 — %s\n" "$(embed_model_feature "sentence-transformers/all-MiniLM-L6-v2")"
+  printf "  2) BAAI/bge-small-en-v1.5 — %s\n" "$(embed_model_feature "BAAI/bge-small-en-v1.5")"
+  printf "  3) mixedbread-ai/mxbai-embed-large-v1 — %s\n" "$(embed_model_feature "mixedbread-ai/mxbai-embed-large-v1")"
+  echo ""
   OLLAMA_EMBED_AVAILABLE=()
   if command -v ollama >/dev/null 2>&1; then
     while IFS= read -r name; do
@@ -454,34 +552,57 @@ do_config_embed_flow() {
       fi
     done < <(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
   fi
-  local i=2
-  for m in "${OLLAMA_EMBED_AVAILABLE[@]}"; do
-    printf "  %s) %s (Ollama)\n" "$i" "$m"
-    i=$((i + 1))
-  done
-  echo ""
+  if [ ${#OLLAMA_EMBED_AVAILABLE[@]} -gt 0 ]; then
+    printf "  ${D}Local Ollama models:${N}\n"
+    local i=4
+    for m in "${OLLAMA_EMBED_AVAILABLE[@]}"; do
+      printf "  %s) %s (Ollama) — %s\n" "$i" "$m" "$(embed_model_feature "$m")"
+      i=$((i + 1))
+    done
+    echo ""
+  fi
+  printf "  Enter N (default), 1, 2, 3, a number for Ollama, or type a Hugging Face model (e.g. org/model):\n"
   local choice
-  read -r -p "Pick embedding model (1 = default, or number) [1]: " choice
-  choice="$(printf '%s' "${choice:-1}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  local embed_model="$DEFAULT_EMBED_MODEL"
+  read -r -p "Choice [N]: " choice
+  choice="$(printf '%s' "$choice" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  local embed_model=""
   local embed_provider=""
-  if [ "$choice" = "1" ] || [ -z "$choice" ]; then
-    embed_model="$DEFAULT_EMBED_MODEL"
+  if [ -z "$choice" ] || [ "$(printf '%s' "$choice" | tr '[:upper:]' '[:lower:]')" = "n" ]; then
+    printf "  ${D}No change. Keeping current model.${N}\n"
+    printf "  ${D}First run may download the model from Hugging Face if not cached.${N}\n"
+    echo ""
+    return
+  elif [ "$choice" = "1" ]; then
+    embed_model="sentence-transformers/all-MiniLM-L6-v2"
+  elif [ "$choice" = "2" ]; then
+    embed_model="BAAI/bge-small-en-v1.5"
+  elif [ "$choice" = "3" ]; then
+    embed_model="mixedbread-ai/mxbai-embed-large-v1"
+  elif printf '%s' "$choice" | grep -q '/'; then
+    embed_model="$choice"
   else
-    local idx=$((choice - 2))
+    local idx=$((choice - 4))
     if [ "$idx" -ge 0 ] 2>/dev/null && [ "$idx" -lt ${#OLLAMA_EMBED_AVAILABLE[@]} ]; then
       embed_model="${OLLAMA_EMBED_AVAILABLE[$idx]}"
       embed_provider="ollama"
     else
-      printf "  ${D}Invalid choice. Using default embed model.${N}\n"
+      printf "  ${D}Invalid choice. Keeping current model.${N}\n"
+      embed_model="$prev_embed"
     fi
+  fi
+  if [ -z "$embed_model" ]; then
+    embed_model="$prev_embed"
   fi
   if [ -n "$embed_provider" ]; then
     (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_embed_config.py "$embed_model" "$current_encoder" --provider "$embed_provider")
   else
     (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_embed_config.py "$embed_model" "$current_encoder")
   fi
-  printf "  ${G}✓${N} Embed model saved to .env. Option 5 (Build RAG index) uses .env.\n"
+  printf "  ${G}✓${N} Embed model saved to .env.\n"
+  if [ "$embed_model" != "$prev_embed" ]; then
+    printf "  ${Y}You *must* rebuild the index with the new model in step 5 (Build RAG/index).${N}\n"
+  fi
+  printf "  ${D}First run may download the model from Hugging Face if not cached.${N}\n"
   echo ""
 }
 
@@ -495,6 +616,7 @@ do_config_encoder_flow() {
 
   printf "\n${D}--- Setup encoder (cross-encoder) model ---${N}\n"
   printf "  Default: %s\n" "$DEFAULT_CROSS_ENCODER_MODEL"
+  printf "  ${D}16GB laptop: default (BGE-v2-m3) is fine.${N}\n"
   echo ""
   local input_encoder
   read -r -p "Encoder model (Enter for default): " input_encoder
@@ -506,7 +628,8 @@ do_config_encoder_flow() {
   else
     (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_embed_config.py "$current_embed" "$cross_encoder_model")
   fi
-  printf "  ${G}✓${N} Encoder model saved to .env. Option 5 (Build RAG index) uses .env.\n"
+  printf "  ${G}✓${N} Encoder model saved to .env. Ask and reindex use this encoder.\n"
+  printf "  ${D}First run may download the model from Hugging Face if not cached.${N}\n"
   echo ""
 }
 
@@ -694,7 +817,7 @@ do_config_llm_flow() {
         fi
       done
       echo ""
-      printf "  ${D}If you run Draft in Docker, restart the container (option 6) to pick up the new LLM.${N}\n"
+      printf "  ${D}If you run Draft in Docker, restart the container (option 8) to pick up the new LLM.${N}\n"
       ;;
     *)
       echo "Skipping LLM configuration."
@@ -734,10 +857,53 @@ do_build_rag_flow() {
     fi
   fi
   if [ "$build_rag" = "1" ]; then
+    # Avoid duplicate rebuild: if index already built with current model, ask to confirm
+    _baseline=""
+    if [ -d "$DRAFT_HOME/.vector_store" ] && [ -n "$(find "$DRAFT_HOME/.vector_store" -type f 2>/dev/null | head -1)" ]; then
+      _baseline=$(cd "$SCRIPT_DIR" && "$PYTHON" -c "
+import sys
+sys.path.insert(0, '.')
+try:
+    import chromadb
+    from chromadb.config import Settings
+    from lib.paths import get_vector_store_root
+    from lib.ingest import COLLECTION_NAME
+    client = chromadb.PersistentClient(path=str(get_vector_store_root()), settings=Settings(anonymized_telemetry=False))
+    col = client.get_collection(COLLECTION_NAME)
+    meta = getattr(col, 'metadata', None) or {}
+    print(meta.get('embed_model') or meta.get('profile', '') or '')
+except Exception:
+    print('')
+" 2>/dev/null) || true
+    fi
+    _current="$(env_val "DRAFT_EMBED_MODEL" "$DEFAULT_EMBED_MODEL")"
+    [ -z "$_current" ] && _current="$DEFAULT_EMBED_MODEL"
+    if [ -n "$_baseline" ] && [ "$_current" = "$_baseline" ]; then
+      read -r -p "The current index was built with the current model. If a rebuild is indeed needed? (y/N): " _confirm_rebuild
+      _confirm_rebuild="$(printf '%s' "${_confirm_rebuild:-n}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      if [ "$_confirm_rebuild" != "y" ] && [ "$_confirm_rebuild" != "yes" ]; then
+        build_rag=0
+        printf "  ${D}Skipping rebuild.${N}\n"
+      fi
+      unset _confirm_rebuild
+    fi
+    unset _baseline _current
+  fi
+  if [ "$build_rag" = "1" ]; then
     printf "${D}Build RAG/vector index ...${N}\n"
     "$SCRIPT_DIR/.venv/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt" 2>/dev/null || true
     if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/index_for_ai.py --profile "$rag_profile" -v); then
       printf "${G}done.${N}\n"
+      _emb="$(env_val "DRAFT_EMBED_MODEL" "$DEFAULT_EMBED_MODEL")"
+      [ -z "$_emb" ] && _emb="$DEFAULT_EMBED_MODEL"
+      echo ""
+      read -r -p "The index is rebuilt with the new embed model ${_emb}. Would you like to run a test? (Y/n): " run_test
+      run_test="$(printf '%s' "${run_test:-y}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      if [ "$run_test" = "y" ] || [ "$run_test" = "yes" ] || [ -z "$run_test" ]; then
+        printf "${D}Running ask.py test ...${N}\n"
+        (cd "$SCRIPT_DIR" && "$PYTHON" scripts/ask.py -q "Explain the ingestion process for Draft's RAG system and how it handles different embedding providers like Ollama and Hugging Face." --debug --show-prompt) || true
+      fi
+      unset _emb
     else
       printf "${R}failed (Ask index not built).${N}\n" >&2
     fi
@@ -792,6 +958,14 @@ do_docker_flow() {
   printf "\n${D}--- Run Draft in a Docker container ---${N}\n"
   if ! command -v docker >/dev/null 2>&1; then
     printf "  ${R}Docker not found. Install Docker Desktop (or docker-engine) and try again.${N}\n"
+    return 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    printf "  ${R}Docker daemon is not running.${N}\n"
+    case "$(uname -s)" in
+      Darwin) printf "  Start Docker Desktop from Applications or the menu bar, then try again.${N}\n" ;;
+      *)      printf "  Start the docker service (e.g. sudo systemctl start docker), then try again.${N}\n" ;;
+    esac
     return 1
   fi
   if [ ! -f "$SCRIPT_DIR/.env" ] && [ -f "$SCRIPT_DIR/.env.example" ]; then
@@ -870,10 +1044,18 @@ do_docker_flow() {
   unset _running
 
   printf "  Starting container (port 8058, data from %s)...\n" "$DRAFT_HOME"
+  printf "  ${D}Mounting .env. HF cache lives under DRAFT_HOME/.cache/huggingface (no separate volume).${N}\n"
+  _env_abs=""
+  if [ -f "$SCRIPT_DIR/.env" ]; then
+    _env_abs="$(cd "$SCRIPT_DIR" 2>/dev/null && pwd)/.env"
+  fi
+  _vol_env=""
+  [ -n "$_env_abs" ] && _vol_env="-v ${_env_abs}:/app/.env:ro"
   if [ "$use_ollama" -eq 1 ]; then
     printf "  ${D}Using --env-file .env and .env.docker (OLLAMA_HOST for host Ollama).${N}\n"
     docker run -p 8058:8058 \
       -v "${DRAFT_HOME}:/.draft" \
+      $_vol_env \
       -e DRAFT_HOME=/.draft \
       --env-file "$SCRIPT_DIR/.env" \
       --env-file "$SCRIPT_DIR/.env.docker" \
@@ -882,6 +1064,7 @@ do_docker_flow() {
     printf "  ${D}Using --env-file .env.${N}\n"
     docker run -p 8058:8058 \
       -v "${DRAFT_HOME}:/.draft" \
+      $_vol_env \
       -e DRAFT_HOME=/.draft \
       --env-file "$SCRIPT_DIR/.env" \
       draft-ui
@@ -898,6 +1081,7 @@ while true; do
   show_current_state
   printf "${D}Consistency check:${N}\n"
   check_sources_consistency
+  show_actions
   echo ""
   printf "${D}Default embed and encoder are set. Change them via options 2 and 3.${N}\n"
   printf "${D}For semantic search via LLM: option 4 (Configure LLM) and option 5 (Build RAG index).${N}\n"
@@ -909,20 +1093,22 @@ while true; do
   printf "  3) Setup encoder model\n"
   printf "  4) Configure LLM\n"
   printf "  5) Build RAG/index (chunking and embeddings)\n"
-  printf "  6) Start/restart the Draft UI in the local host (default)\n"
-  printf "  7) Run Draft in a Docker container\n"
-  printf "  8) Done/Exit the setup\n"
-  read -r -p "Choice (1-8) [6]: " menu_choice
-  menu_choice="${menu_choice:-6}"
+  printf "  6) Test RAG + LLM\n"
+  printf "  7) Start/restart the Draft UI in the local host (default)\n"
+  printf "  8) Run Draft in a Docker container\n"
+  printf "  9) Done/Exit the setup\n"
+  read -r -p "Choice (1-9) [7]: " menu_choice
+  menu_choice="${menu_choice:-7}"
   case "$menu_choice" in
     1) DRAFT_ADD_SOURCES=Y do_add_sources_flow ;;
     2) do_config_embed_flow ;;
     3) do_config_encoder_flow ;;
     4) DRAFT_CONFIG_LLM=Y do_config_llm_flow ;;
     5) DRAFT_BUILD_RAG=Y do_build_rag_flow ;;
-    6) DRAFT_START_UI=Y do_start_ui_flow; exit 0 ;;
-    7) do_docker_flow; exit 0 ;;
-    8) printf "${D}Done.${N}\n"; exit 0 ;;
+    6) printf "${D}Running RAG + LLM test ...${N}\n"; (cd "$SCRIPT_DIR" && "$PYTHON" scripts/ask.py -q "Explain the ingestion process for Draft's RAG system and how it handles different embedding providers like Ollama and Hugging Face." --debug --show-prompt) || true ;;
+    7) DRAFT_START_UI=Y do_start_ui_flow; exit 0 ;;
+    8) do_docker_flow; exit 0 ;;
+    9) printf "${D}Done.${N}\n"; exit 0 ;;
     *) printf "${D}Invalid.${N}\n" ;;
   esac
   echo ""

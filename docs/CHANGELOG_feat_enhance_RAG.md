@@ -88,9 +88,9 @@ This branch adds cross-encoder reranking, Ollama-based embedding/reranking, a de
 
 - **setup.sh**
   - **show_current_state():** Shows **Embed** and **Cross-encoder** from `.env` when present; RAG index line no longer says “freshly baked”.
-  - **do_config_embed_flow()** (new): Interactive flow to choose embedding and cross-encoder:
-    - If Ollama is available, suggests Qwen3 pairs (Gold: 8b embed + 0.6B reranker; 8B+8B; 0.6B+0.6B) and can pull them.
-    - Options: default (sentence-transformers), or Ollama G/L/S. Writes choices via `scripts/setup_embed_config.py` and sets **`HF_HUB_OFFLINE=1`** in `.env`.
+  - **do_config_embed_flow()** (new): Interactive flow to choose embedding model:
+    - Shows current model with one-line feature; suggests three Hugging Face models (`all-MiniLM-L6-v2`, `BAAI/bge-small-en-v1.5`, `mixedbread-ai/mxbai-embed-large-v1`); lists local Ollama embedding models if available; allows typing a custom Hugging Face model (e.g. `org/model-name`).
+    - Writes choices via `scripts/setup_embed_config.py`. When the embedding model changes, reminds user to rebuild the RAG index (option 5).
   - Main menu extended so “Configure embedding and cross-encoder” can be run; LLM config and RAG index build unchanged in spirit but run after embed config when chosen.
   - No change to sources.yaml or vault handling.
 
@@ -175,7 +175,46 @@ This branch adds cross-encoder reranking, Ollama-based embedding/reranking, a de
 
 ---
 
-## 8. Other
+## 8. Vector store under DRAFT_HOME and disk allocation
+
+### 8.1 Vector store location (Option B)
+
+- **RAG index now lives under `DRAFT_HOME/.vector_store/`** (e.g. `~/.draft/.vector_store`) instead of the draft repo root. This makes the index persist in containers when `DRAFT_HOME` is mounted as a volume; no extra PVC or volumeMount required.
+
+- **lib/paths.py**
+  - New `get_vector_store_root()` returns `get_draft_home() / ".vector_store"`.
+
+- **lib/ingest.py**
+  - `build_index()` uses `get_vector_store_root()` instead of `draft_root / VECTOR_DIR`. Removed unused `VECTOR_DIR`.
+
+- **lib/ai_engine.py**
+  - `_get_collection()` uses `get_vector_store_root()` instead of `draft_root / VECTOR_DIR`.
+
+- **setup.sh**
+  - Chroma checks and Python snippets now use `$DRAFT_HOME/.vector_store` and `get_vector_store_root()` instead of `$SCRIPT_DIR/.vector_store` and `VECTOR_DIR`.
+
+- **Migration:** Users with an existing index at `<repo>/.vector_store` must rebuild once; the new index is created under `DRAFT_HOME/.vector_store`.
+
+### 8.2 Disk space allocation (2× estimate)
+
+- **deployment/pvc.yaml**
+  - draft-data-pvc: 5 Gi → **2 Gi**
+  - draft-hf-cache-pvc: 10 Gi → **2 Gi**
+  - Sizes reflect 2× of estimated usage (DRAFT_HOME ~500 MB, HF cache ~1 GB).
+
+- **docs/container-orchestration-guide.md**
+  - New **Disk space** section: estimated usage table, 2× allocation table, and recommendations for Docker (~4 GB host free) and Kubernetes (2 Gi per PVC).
+  - Mount notes reference ~2 GB per volume.
+  - Prerequisites and example manifests table updated with default sizes.
+
+- **docs/RAG_operations.md**
+  - Added disk note in container section: ensure ~4 GB free for volumes.
+
+- **Docs updated** for vector store path: RAG-design-principles.md, intelligence-layer-design.md, storage-and-metadata-design.md, local-oracle-design.md, CLAUDE.md.
+
+---
+
+## 9. Other
 
 - **.claude/settings.json**
   - New or updated Claude Code project settings (if present).
@@ -186,15 +225,16 @@ This branch adds cross-encoder reranking, Ollama-based embedding/reranking, a de
 
 | Area        | Files |
 |------------|--------|
-| RAG core   | lib/ai_engine.py, lib/ingest.py, lib/ollama_embed.py (new) |
+| RAG core   | lib/ai_engine.py, lib/ingest.py, lib/ollama_embed.py (new), lib/paths.py |
 | CLI        | scripts/ask.py (new), scripts/index_for_ai.py, scripts/setup_embed_config.py (new) |
 | Setup      | setup.sh |
 | Config     | .env.example, requirements.txt |
+| Deployment | deployment/pvc.yaml, deployment/deployment.yaml, deployment/configmap.yaml, deployment/secret.yaml, deployment/service.yaml |
 | Logging    | lib/log.py |
 | Tests      | tests/test_pipeline.py (new), tests/test_ask.py, tests/test_components.py |
 | UI         | ui/app.py, ui/static/index.html, ui/static/app.js, ui/static/style.css |
-| Docs       | README.md, docs/RAG_operations.md (new), docs/testing-suites.md |
-| Other      | .claude/settings.json (new) |
+| Docs       | README.md, docs/RAG_operations.md (new), docs/testing-suites.md, docs/container-orchestration-guide.md (new), docs/RAG-design-principles.md, docs/intelligence-layer-design.md, docs/storage-and-metadata-design.md, docs/local-oracle-design.md |
+| Other      | .claude/settings.json (new), CLAUDE.md |
 
 ---
 

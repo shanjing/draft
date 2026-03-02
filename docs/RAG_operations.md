@@ -1,88 +1,60 @@
 # RAG Operations
 
-How to build the RAG index, ask questions, and run end-to-end tests. Embed and encoder models are configured in setup and stored in `.env`; option 4 (Build RAG index) uses whatever `.env` has.
+How to change embed/encoder models and how to run RAG + LLM tests. See **RAG-design-principles.md** for architecture and model-performance guidance.
 
 ---
 
-## Default models
+## a. How to change models
 
-| Role | Default |
-|------|---------|
-| **Embed** | `sentence-transformers/all-MiniLM-L6-v2` (Hugging Face) |
-| **Encoder (reranker)** | `cross-encoder/ms-marco-MiniLM-L-6-v2` (Hugging Face only) |
-
-- **Encoder is always Hugging Face** (cross-encoder). Reranking does not use Ollama.
-- **Embed** can be Hugging Face or Ollama. If you use an Ollama embed model (e.g. `qwen3-embedding:8b`), set `DRAFT_EMBED_PROVIDER=ollama` in `.env` (setup step 2 does this when you enter a model name without a `/`).
-
-Index profiles (quick/deep) control chunking and batch sizes; the embed/encoder model names come from `.env` (`DRAFT_EMBED_MODEL`, `DRAFT_CROSS_ENCODER_MODEL`). `.env` is the source of truth for these two models globally.
+- **Source of truth:** `.env` (`DRAFT_EMBED_MODEL`, `DRAFT_CROSS_ENCODER_MODEL`, and for Ollama embed: `DRAFT_EMBED_PROVIDER=ollama`).
+- **Via setup:** Run `./setup.sh`. Use **option 2** (Setup embedding model) and **option 3** (Setup encoder model) to choose or type Hugging Face model names; option 2 also lists local Ollama embedding models. When the embed model changes, setup reminds you to rebuild the index (option 5).
+- **Rebuild required:** After changing the embed model, run **option 5** (Build RAG/index) so the vector index matches the new model. The **Actions** section in setup shows `[required]` when the current Embed in `.env` does not match the RAG index.
+- **Defaults:** Embed `sentence-transformers/all-MiniLM-L6-v2`; encoder `cross-encoder/ms-marco-MiniLM-L-6-v2`. For strict offline use, set `HF_HUB_OFFLINE=1` in `.env`.
+- **16GB laptop (no GPU):** Use `nomic-ai/nomic-embed-text-v1.5` + `BAAI/bge-reranker-v2-m3` (see RAG-design-principles.md).
 
 ---
 
-## CLI commands
+## b. How to run tests
 
-### Build RAG index
+### From setup (interactive)
 
-```bash
-python scripts/index_for_ai.py [--profile quick|deep] [-v]
-```
+- **Option 6 — Testing RAG + LLM:** Runs a single ask with a fixed question (ingestion + embedding providers), `--debug` and `--show-prompt`. Use after building the index (option 5) or when you want a quick smoke test.
+- **After option 5 (Build RAG/index):** On successful build, setup offers “Would you like to run a test? (Y/n)” and runs the same ask command if you accept.
 
-Uses **embed and encoder from `.env`** (set by setup step 2). Option 4 in setup (“Build RAG/index”) runs this with the same .env.
-
-- `--profile quick` — Default; faster indexing, smaller chunks.
-- `--profile deep` — Larger chunks; embed model still from `.env`.
-- `-v` / `--verbose` — Show embed model, provider, and progress.
-
-Examples:
+### Manual CLI
 
 ```bash
-python scripts/index_for_ai.py -v
-python scripts/index_for_ai.py --profile deep -v
+# From repo root: one-off question (requires built index + LLM config in .env)
+python scripts/ask.py -q "Explain the ingestion process for Draft's RAG system and how it handles different embedding providers like Ollama and Hugging Face." --debug --show-prompt
 ```
 
-### Ask questions (retrieval + LLM)
-
-```bash
-python scripts/ask.py -q "your question" [--debug]
-```
-
-- `-q` / `--query` — Question (required).
-- `--debug` — Log embed model, cross-encoder, rerank scores, and verbose output.
-
-Output: prints **Models** (embed, encoder, LLM), then the answer, then **---** and numbered **citations** with `[score: x]` and optional line ranges.
-
-Requires: built RAG index and LLM config (`OLLAMA_MODEL` or API keys in `.env`).
-
-Examples:
-
-```bash
-python scripts/ask.py -q "what is vault"
-python scripts/ask.py -q "how does pull work" --debug
-```
-
-### End-to-end pipeline test
-
-```bash
-python tests/test_pipeline.py [options] [-q "question"] [-v]
-```
-
-Runs retrieval + rerank over the **existing index** (no rebuild by default). Same output style as `ask.py`: **Models** (embed, encoder, LLM), answer, then **---** and top-3 **citations** with rerank scores. Use `--rebuild` to build the index from `sources.yaml` first (required on first run or after adding sources).
-
-| Option | Description |
-|--------|-------------|
-| `-p` / `--pair` | Legacy: default/d (uses .env), G/L/S (overrides for tests). Default: `default`. |
-| `-q` / `--query` | Question to ask (default: "What is this project about?") |
-| `--rebuild` | Rebuild index from sources.yaml before retrieval (default: use existing index) |
-| `--profile quick\|deep` | Index profile when building (default: quick) |
-| `-v` / `--verbose` | Show models, build/rerank details, and citation scores |
-
-Examples:
+### Pipeline test (existing index or rebuild)
 
 ```bash
 # Use existing index (embed/encoder from .env)
 python tests/test_pipeline.py -q "what is vault" -v
 
-# Rebuild index then run retrieval (uses .env for embed model)
+# Rebuild index then run retrieval + LLM
 python tests/test_pipeline.py --rebuild -q "what is vault" -v
 ```
 
-Run from the draft repo root.
+Options: `-p default|d|G|L|S` (model pair), `--profile quick|deep`, `--rebuild`, `-v`. Run from draft repo root.
+
+### CI/CD
+
+- Run the test suite (e.g. `pytest tests/`) for unit and integration tests.
+- For a RAG pipeline check in CI: run `python tests/test_pipeline.py --rebuild -q "What is this project about?" -v` (or with `-p default`) so the job builds the index from `sources.yaml` and runs one Ask. Ensure `.env` or CI env provides `DRAFT_EMBED_MODEL`, `DRAFT_CROSS_ENCODER_MODEL`, and LLM config (`OLLAMA_MODEL` or API keys) as needed.
+
+---
+
+## c. Vector store location
+
+The RAG vector index (ChromaDB) lives under **`DRAFT_HOME/.vector_store/`** (e.g. `~/.draft/.vector_store` by default). This keeps all user data under one root and ensures the index **persists** in containers when `DRAFT_HOME` is mounted as a volume. Rebuild from the UI or with `python scripts/index_for_ai.py --profile quick`.
+
+**Migration:** If you previously had an index at `<repo>/.vector_store`, it is no longer used. Rebuild the index once—it will be created under `DRAFT_HOME/.vector_store`.
+
+---
+
+## d. Operations in containers (Docker / Kubernetes)
+
+RAG operations work the same way when Draft runs in containers: embed and encoder models are read from **environment configuration** (mounted `.env` or ConfigMap/Secret). The app **re-reads** config on each reindex and on each Ask for the LLM; changing `DRAFT_EMBED_MODEL` or `DRAFT_CROSS_ENCODER_MODEL` does **not** require a container or pod restart—run a reindex (e.g. from the UI or by running the index script in the container) after changing the embed model so the vector index matches. Data lives under a single root (`DRAFT_HOME`) that you mount as a volume—including the vector store at `DRAFT_HOME/.vector_store`; the same image can target local Ollama, in-cluster LLMs, or cloud APIs by changing env. **Disk:** Ensure ~4 GB free for DRAFT_HOME (includes HF cache at `.cache/huggingface`; see [Container orchestration guide](container-orchestration-guide.md#disk-space)). For full setup (build, run, mounts, K8s manifests), see **[Container orchestration guide](container-orchestration-guide.md)**.

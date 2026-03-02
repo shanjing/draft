@@ -17,10 +17,10 @@ There are limitations to this MVP RAG system:
 import os
 from pathlib import Path
 
-from lib.ingest import VECTOR_DIR, COLLECTION_NAME, EMBED_MODEL, TRUST_REMOTE_CODE  # noqa: F401
+from lib.ingest import COLLECTION_NAME, EMBED_MODEL, TRUST_REMOTE_CODE  # noqa: F401
 from lib.log import get_logger
 from lib.manifest import parse_sources_yaml
-from lib.paths import get_effective_repo_root, get_sources_yaml_path, get_vault_root
+from lib.paths import get_effective_repo_root, get_hf_cache_root, get_sources_yaml_path, get_vault_root
 from lib.prompts import SYSTEM_PROMPT
 
 log = get_logger(__name__)
@@ -47,9 +47,34 @@ def _ensure_env_loaded(draft_root: Path) -> None:
         pass
 
 
+def _reload_env_from_file(draft_root: Path) -> None:
+    """Re-load .env from draft root with override=True so embed/encoder/LLM config is fresh (e.g. in Docker with mounted .env). No restart needed when .env changes."""
+    env_path = draft_root / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_path, override=True)
+    except ImportError:
+        pass
+
+
+def _get_llm_endpoint_base() -> str | None:
+    """Unified LLM endpoint base URL (DRAFT_LLM_ENDPOINT). None if not set. Strips trailing slash."""
+    base = _env_strip("DRAFT_LLM_ENDPOINT", "")
+    if not base:
+        return None
+    base = base.rstrip("/")
+    if not base.startswith("http://") and not base.startswith("https://"):
+        base = "http://" + base
+    return base
+
+
 def llm_ready(draft_root: Path) -> bool:
-    """True if a valid LLM is configured: local (Ollama model set) or cloud with non-empty API key. No network check."""
+    """True if a valid LLM is configured: unified endpoint, or provider-based (Ollama/cloud). No network check."""
     _ensure_env_loaded(draft_root)
+    if _get_llm_endpoint_base():
+        return True
     provider = _env_strip("DRAFT_LLM_PROVIDER", "").lower()
     cloud_model = _env_strip("CLOUD_AI_MODEL")
     local_model = _env_strip("LOCAL_AI_MODEL")
@@ -118,7 +143,8 @@ def _get_collection(draft_root: Path):
     import numpy as np  # Chroma/DuckDB expect numpy to be available; load before chromadb
     import chromadb
     from chromadb.config import Settings
-    persist_dir = draft_root / VECTOR_DIR
+    from lib.paths import get_vector_store_root
+    persist_dir = get_vector_store_root()
     if not persist_dir.is_dir():
         return None
     client = chromadb.PersistentClient(
@@ -287,11 +313,13 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt
     Yields: ("models", dict), ("prompt", dict) if show_prompt, ("text", str), ("citations", list), ("error", str).
     When debug=True, logs embed_model, cross_encoder_model, retrieval count, and rerank scores.
     When show_prompt=True, yields ("prompt", {"system": str, "user": str}) with the final prompt before calling the LLM.
+    Re-loads .env at start so embed/encoder changes take effect without restart (Docker/K8s).
     """
-    # Use same HF cache as ingest for cross-encoder
-    hf_cache = draft_root / ".cache" / "huggingface"
+    _reload_env_from_file(draft_root)
+    # Use same HF cache as ingest (DRAFT_HOME/.cache/huggingface)
+    hf_cache = get_hf_cache_root()
     hf_cache.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("HF_HOME", str(hf_cache))
+    os.environ["HF_HOME"] = str(hf_cache)
 
     coll = _get_collection(draft_root)
     meta = (getattr(coll, "metadata", None) or {}) if coll else {}
@@ -315,20 +343,27 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt
 
     citations = _build_citations(draft_root, chunks)
 
-    # Compute LLM model for display (before early return)
+    # Compute LLM model for display and which streamer to use
     _ensure_env_loaded(draft_root)
+    endpoint_base = _get_llm_endpoint_base()
     provider = _env_strip("DRAFT_LLM_PROVIDER", "").lower()
     model_override = _env_strip("DRAFT_LLM_MODEL") or None
     cloud_model = _env_strip("CLOUD_AI_MODEL")
     local_model = _env_strip("LOCAL_AI_MODEL")
     if local_model and local_model.startswith("ollama_chat/"):
         local_model = local_model.replace("ollama_chat/", "", 1)
+    ollama_model = _env_strip("OLLAMA_MODEL") or local_model or "qwen3:8b"
     if not provider and cloud_model:
         provider = "gemini"
     if not provider and (local_model or _env_strip("OLLAMA_MODEL")):
         provider = "ollama"
-    ollama_model = _env_strip("OLLAMA_MODEL") or local_model or "qwen3:8b"
-    if provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
+    if not provider:
+        provider = "ollama"
+    if endpoint_base:
+        llm_model = model_override or _env_strip("OLLAMA_MODEL") or (
+            "gpt-4o-mini" if _env_strip("DRAFT_LLM_API_KEY") else ollama_model
+        )
+    elif provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
         llm_model = model_override or "claude-3-5-sonnet-20241022"
     elif provider == "gemini":
         llm_model = (model_override or cloud_model or "gemini-2.5-flash").strip()
@@ -354,7 +389,14 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt
     if show_prompt:
         yield ("prompt", {"system": SYSTEM_PROMPT, "user": user_content})
 
-    if provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
+    # Unified endpoint: one URL for Ollama or OpenAI-compatible (K8s / public LLM)
+    if endpoint_base:
+        api_key = _env_strip("DRAFT_LLM_API_KEY", "")
+        if api_key:
+            yield from _stream_openai_compatible(endpoint_base, api_key, llm_model, user_content)
+        else:
+            yield from _stream_ollama(user_content, llm_model, base_url=endpoint_base)
+    elif provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
         api_key = _env_strip("ANTHROPIC_API_KEY")
         if api_key:
             yield from _stream_claude(user_content, api_key, model_override)
@@ -413,6 +455,27 @@ def _stream_gemini(user_content: str, api_key: str, model_override: str | None =
         yield ("error", str(e))
 
 
+def _stream_openai_compatible(base_url: str, api_key: str, model_name: str, user_content: str):
+    """Stream from an OpenAI-compatible chat API at base_url (e.g. gateway or public LLM). For unified DRAFT_LLM_ENDPOINT + DRAFT_LLM_API_KEY."""
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key, base_url=base_url.rstrip("/"))
+    try:
+        stream = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            max_tokens=1024,
+            stream=True,
+        )
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield ("text", chunk.choices[0].delta.content)
+    except Exception as e:
+        yield ("error", str(e))
+
+
 def _stream_openai(user_content: str, api_key: str, model_override: str | None = None):
     from openai import OpenAI
     model_name = model_override or "gpt-4o-mini"
@@ -434,14 +497,17 @@ def _stream_openai(user_content: str, api_key: str, model_override: str | None =
         yield ("error", str(e))
 
 
-def _stream_ollama(user_content: str, model_name: str | None = None):
+def _stream_ollama(user_content: str, model_name: str | None = None, base_url: str | None = None):
     import urllib.request
     import json
-    from lib.ollama_embed import OLLAMA_BASE
+    if base_url is None:
+        from lib.ollama_embed import OLLAMA_BASE
+        base_url = OLLAMA_BASE
+    base_url = base_url.rstrip("/")
     model = model_name or "qwen3:8b"
     try:
         req = urllib.request.Request(
-            f"{OLLAMA_BASE}/api/generate",
+            f"{base_url}/api/generate",
             data=json.dumps({
                 "model": model,
                 "prompt": f"{SYSTEM_PROMPT}\n\n{user_content}",

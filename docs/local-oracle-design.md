@@ -82,7 +82,7 @@ Store the exact chunk text in the index (or a stable reference) so retrieval can
 ### Vector Store
 
 - **Options**: **ChromaDB** (simpler metadata + filtering) or **FAISS** (lighter; store metadata in parallel and join after search).
-- **Location**: Under the draft root, e.g. `.vector_store/` or `draft/.chroma/`, so it stays next to the docs and can be gitignored.
+- **Location**: Under `DRAFT_HOME` (e.g. `~/.draft/.vector_store/`), so all user data stays in one root and persists in containers when `DRAFT_HOME` is mounted.
 - **Schema**: At least `(id, text, embedding, repo, path, heading_or_id)`. Optional: `source_path` for a direct link.
 
 ### Ingestion Pipeline (recommended)

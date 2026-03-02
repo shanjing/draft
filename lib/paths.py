@@ -70,6 +70,16 @@ def get_vault_root() -> Path:
     return get_draft_home() / VAULT_DIR
 
 
+def get_vector_store_root() -> Path:
+    """RAG vector store directory: ~/.draft/.vector_store (or DRAFT_HOME/.vector_store)."""
+    return get_draft_home() / ".vector_store"
+
+
+def get_hf_cache_root() -> Path:
+    """Hugging Face model cache: ~/.draft/.cache/huggingface (or DRAFT_HOME/.cache/huggingface). Models are stored here so they persist in Docker and avoid re-downloads when switching models."""
+    return get_draft_home() / ".cache" / "huggingface"
+
+
 def ensure_vault_ready() -> Path:
     """Ensure DRAFT_HOME and vault directory exist; create if missing. Call at startup."""
     home = get_draft_home()

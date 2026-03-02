@@ -23,7 +23,7 @@ flowchart LR
   subgraph rag["RAG (Ask)"]
     chunk["Chunking\n(header + para, ~2400 chars)"]
     embed["SentenceTransformer\n(nomic-embed-text-v1.5)"]
-    chroma["ChromaDB\n.vector_store/"]
+    chroma["ChromaDB\nDRAFT_HOME/.vector_store/"]
     llm["LLM\n(Ollama / Claude / Gemini / OpenAI)"]
   end
 
@@ -113,7 +113,7 @@ Used for: Chroma document metadata and for **citations** in the Ask UI (repo/pat
 
 | Item | Value |
 |------|--------|
-| **Persist dir** | `DRAFT_ROOT/.vector_store/` |
+| **Persist dir** | `DRAFT_HOME/.vector_store/` (e.g. `~/.draft/.vector_store`) |
 | **Collection** | `draft_docs` (single collection) |
 | **Embedding model** | `nomic-ai/nomic-embed-text-v1.5` (SentenceTransformer, `trust_remote_code=True`) |
 | **Cache** | `DRAFT_ROOT/.cache/huggingface` when running `scripts/index_for_ai.py` (env in script) |
@@ -215,7 +215,7 @@ Aligning search with these exclusions is a possible improvement so search and As
 - **content_hash in Chroma** — Add SHA-256 of source file to chunk metadata and to a file registry for re-link without re-embedding (see storage-and-metadata-design.md).
 - **Incremental vector index** — Update only changed/new files instead of full rebuild (would require file registry + mtime or hash).
 - **Hybrid search** — Combine Whoosh (keyword) and Chroma (semantic) for Ask (e.g. retrieve from both and merge/rerank).
-- **Configurable embedding model** — Allow override of `EMBED_MODEL` via env or config (today it is fixed in `lib/ingest.py`).
+- **Configurable embedding model** — Implemented: `DRAFT_EMBED_MODEL` in `.env` overrides the default; setup.sh option 2 lets you choose or type a custom model.
 - **Search exclusions** — Apply the same exclude list in `ui/search_index.py` as in ingest/pull so search and RAG see the same docs.
 - **RAG tuning** — Adjust `TOP_K`, context length, or add reranking; keep “answer only from context” as the default policy.
 
