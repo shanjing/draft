@@ -49,7 +49,11 @@
       <div id="pull-status" class="pull-status hidden"></div>
       <div id="system-console" class="system-console collapsed">
         <div class="system-console-header" id="system-console-toggle">
-          <span class="system-console-pulse"></span>
+          <span class="system-console-dots" aria-hidden="true">
+            <span class="system-console-dot system-console-dot-red"></span>
+            <span class="system-console-dot system-console-dot-yellow"></span>
+            <span class="system-console-dot system-console-dot-green"></span>
+          </span>
           <span>SYSTEM CONSOLE</span>
           <span class="system-console-chevron"></span>
         </div>
@@ -82,9 +86,7 @@
             <div id="ask-models-wrap" class="ask-models-wrap ask-models-collapsed">
               <div id="ask-models" class="ask-models" aria-live="polite">
                 <div class="ask-models-reindex">
-                  <button type="button" id="ask-reindex" class="btn-link">Quick rebuild</button>
-                  <span class="ask-models-sep">/</span>
-                  <button type="button" id="ask-reindex-deep" class="btn-link">Deep rebuild (nomic)</button>
+                  <button type="button" id="ask-reindex" class="btn-link">Rebuild</button>
                 </div>
               </div>
             </div>

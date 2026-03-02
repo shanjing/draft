@@ -323,7 +323,9 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt
 
     coll = _get_collection(draft_root)
     meta = (getattr(coll, "metadata", None) or {}) if coll else {}
-    embed_model = meta.get("embed_model") or EMBED_MODEL
+    # Display: prefer .env (configured) over collection metadata so UI matches config
+    embed_model_display = _env_strip("DRAFT_EMBED_MODEL") or meta.get("embed_model") or EMBED_MODEL
+    embed_model = meta.get("embed_model") or EMBED_MODEL  # retrieval uses index-built model
 
     chunks = retrieve(draft_root, query, top_k=RETRIEVAL_TOP_K)
     if debug:
@@ -372,9 +374,9 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt
     else:
         llm_model = ollama_model
 
-    # Emit model info after retrieval+rerank, before streaming
+    # Emit model info after retrieval+rerank, before streaming (display from .env/config)
     yield ("models", {
-        "embed_model": embed_model,
+        "embed_model": embed_model_display,
         "cross_encoder_model": _get_cross_encoder_model(),
         "llm_model": llm_model,
     })

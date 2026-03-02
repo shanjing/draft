@@ -286,15 +286,17 @@ class ReindexAIBody(BaseModel):
 
 @app.get("/api/llm_status")
 def api_llm_status():
-    """Return current LLM provider and model from env (for debugging). When DRAFT_LLM_ENDPOINT is set, provider is 'endpoint'."""
+    """Return current LLM provider and model from .env (for debugging). Re-reads .env so values are fresh."""
     from lib import ai_engine
-    ai_engine._ensure_env_loaded(DRAFT_ROOT)
+    ai_engine._reload_env_from_file(DRAFT_ROOT)
     endpoint = ai_engine._get_llm_endpoint_base()
+    embed = ai_engine._env_strip("DRAFT_EMBED_MODEL") or ""
+    encoder = ai_engine._env_strip("DRAFT_CROSS_ENCODER_MODEL") or ""
     if endpoint:
         model = ai_engine._env_strip("DRAFT_LLM_MODEL") or ai_engine._env_strip("OLLAMA_MODEL") or (
             "gpt-4o-mini" if ai_engine._env_strip("DRAFT_LLM_API_KEY") else "qwen3:8b"
         )
-        return {"provider": "endpoint", "model": model, "endpoint": endpoint}
+        return {"provider": "endpoint", "model": model, "endpoint": endpoint, "embed_model": embed or None, "cross_encoder_model": encoder or None}
     provider = ai_engine._env_strip("DRAFT_LLM_PROVIDER", "")
     model = ai_engine._env_strip("OLLAMA_MODEL") or ai_engine._env_strip("LOCAL_AI_MODEL") or ""
     if model and model.startswith("ollama_chat/"):
@@ -308,7 +310,7 @@ def api_llm_status():
     if not provider:
         provider = "ollama"
         model = model or "qwen3:8b"
-    return {"provider": provider, "model": model}
+    return {"provider": provider, "model": model, "embed_model": embed or None, "cross_encoder_model": encoder or None}
 
 
 @app.post("/api/ask")
