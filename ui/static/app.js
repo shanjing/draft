@@ -922,6 +922,7 @@
   function setConsoleRunning(running) {
     if (!systemConsolePanel) return;
     systemConsolePanel.classList.toggle('running', !!running);
+    if (running) systemConsolePanel.classList.remove('collapsed');
   }
 
   function beginExecution() {
@@ -951,6 +952,11 @@
       lines.forEach(function (t) { appendConsoleLine(t); });
     }
   }
+
+  window.appendConsoleLine = appendConsoleLine;
+  window.appendConsoleLines = appendConsoleLines;
+  window.beginExecution = beginExecution;
+  window.endExecution = endExecution;
 
   function runPull() {
     var statusEl = document.getElementById('pull-status');
@@ -1735,47 +1741,39 @@
     }
 
     var reindexBtn = document.getElementById('ask-reindex');
-    var reindexDeepBtn = document.getElementById('ask-reindex-deep');
     function runAiReindex(mode) {
-      var quickBtn = reindexBtn;
-      var deepBtn = reindexDeepBtn;
-      if (quickBtn) quickBtn.disabled = true;
-      if (deepBtn) deepBtn.disabled = true;
-      if (mode === 'quick' && quickBtn) quickBtn.textContent = 'Building…';
-      if (mode === 'deep' && deepBtn) deepBtn.textContent = 'Building…';
-      appendConsoleLine('$ reindex AI --profile ' + mode);
-      beginExecution();
+      if (reindexBtn) {
+        reindexBtn.disabled = true;
+        reindexBtn.textContent = 'Building…';
+      }
+      if (typeof beginExecution === 'function') beginExecution();
+      if (typeof appendConsoleLine === 'function') appendConsoleLine('$ reindex AI --profile ' + (mode || 'quick'));
       fetch('/api/reindex_ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: mode })
+        body: JSON.stringify({ mode: mode || 'quick' })
       })
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          if (d.logs && d.logs.length) appendConsoleLines(d.logs);
-          else if (d.ok) appendConsoleLine('AI index built: ' + (d.indexed || 0) + ' chunks.');
+          if (d.logs && d.logs.length && typeof appendConsoleLines === 'function') appendConsoleLines(d.logs);
+          else if (d.ok && typeof appendConsoleLine === 'function') appendConsoleLine('AI index built: ' + (d.indexed || 0) + ' chunks.');
           if (!d.ok && d.error) {
             showAskError(d.error);
-            if (!(d.logs && d.logs.length)) appendConsoleLine('AI reindex failed: ' + (d.error || ''));
+            if (!(d.logs && d.logs.length) && typeof appendConsoleLine === 'function') appendConsoleLine('AI reindex failed: ' + (d.error || ''));
           }
         })
         .catch(function (err) {
-          appendConsoleLine('AI reindex failed: ' + (err.message || ''));
+          if (typeof appendConsoleLine === 'function') appendConsoleLine('AI reindex failed: ' + (err.message || ''));
         })
         .then(function () {
-          if (quickBtn) {
-            quickBtn.disabled = false;
-            quickBtn.textContent = 'Quick rebuild';
+          if (reindexBtn) {
+            reindexBtn.disabled = false;
+            reindexBtn.textContent = 'Rebuild';
           }
-          if (deepBtn) {
-            deepBtn.disabled = false;
-            deepBtn.textContent = 'Deep rebuild (nomic)';
-          }
-          endExecution();
+          if (typeof endExecution === 'function') endExecution();
         });
     }
     if (reindexBtn) reindexBtn.addEventListener('click', function () { runAiReindex('quick'); });
-    if (reindexDeepBtn) reindexDeepBtn.addEventListener('click', function () { runAiReindex('deep'); });
 
     function showAskError(msg) {
       errorEl.textContent = msg || '';
