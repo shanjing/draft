@@ -42,14 +42,19 @@ DOC_CONTENT_TYPES = {
 if str(DRAFT_ROOT) not in sys.path:
     sys.path.insert(0, str(DRAFT_ROOT))
 
-# Load .env so DRAFT_LLM_* and OLLAMA_MODEL work regardless of how server is started
+# Load .env so DRAFT_LLM_* and embed/encoder models work regardless of how server is started
 try:
     from dotenv import load_dotenv
     load_dotenv(DRAFT_ROOT / ".env")
 except ImportError:
     pass
-# Prefer offline: no Hugging Face network use unless explicitly enabled
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
+# HF cache under DRAFT_HOME so models persist in Docker and avoid re-downloads
+from lib.paths import get_hf_cache_root
+_hf = get_hf_cache_root()
+_hf.mkdir(parents=True, exist_ok=True)
+os.environ["HF_HOME"] = str(_hf)
+# Allow Hugging Face to download encoder/embed models when not cached
+os.environ["HF_HUB_OFFLINE"] = "0"
 
 from lib.log import logger, configure as configure_log
 from lib.manifest import parse_sources_yaml
@@ -281,9 +286,15 @@ class ReindexAIBody(BaseModel):
 
 @app.get("/api/llm_status")
 def api_llm_status():
-    """Return current LLM provider and model from env (for debugging)."""
+    """Return current LLM provider and model from env (for debugging). When DRAFT_LLM_ENDPOINT is set, provider is 'endpoint'."""
     from lib import ai_engine
     ai_engine._ensure_env_loaded(DRAFT_ROOT)
+    endpoint = ai_engine._get_llm_endpoint_base()
+    if endpoint:
+        model = ai_engine._env_strip("DRAFT_LLM_MODEL") or ai_engine._env_strip("OLLAMA_MODEL") or (
+            "gpt-4o-mini" if ai_engine._env_strip("DRAFT_LLM_API_KEY") else "qwen3:8b"
+        )
+        return {"provider": "endpoint", "model": model, "endpoint": endpoint}
     provider = ai_engine._env_strip("DRAFT_LLM_PROVIDER", "")
     model = ai_engine._env_strip("OLLAMA_MODEL") or ai_engine._env_strip("LOCAL_AI_MODEL") or ""
     if model and model.startswith("ollama_chat/"):

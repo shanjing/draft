@@ -28,7 +28,7 @@ def write_embed_config(
     content = env_path.read_text()
     lines = content.splitlines()
     out: list[str] = []
-    embed_handled = cross_handled = provider_handled = rerank_removed = hf_offline_handled = False
+    embed_handled = cross_handled = provider_handled = rerank_removed = False
 
     embed_line = f"DRAFT_EMBED_MODEL='{embed_model}'"
     cross_line = f"DRAFT_CROSS_ENCODER_MODEL='{cross_encoder_model}'"
@@ -52,13 +52,8 @@ def write_embed_config(
             rerank_removed = True
             continue
         if re.match(r"^#?\s*HF_HUB_OFFLINE\s*=", line):
-            out.append("HF_HUB_OFFLINE=1")
-            hf_offline_handled = True
             continue
         out.append(line)
-
-    if not hf_offline_handled:
-        out.append("HF_HUB_OFFLINE=1")
     if not embed_handled:
         out.append(embed_line)
     if not cross_handled:

@@ -1,0 +1,19 @@
+# Service for Draft UI (ClusterIP).
+# Apply after Deployment: kubectl apply -f deployment/service.yaml
+# Access within cluster at http://draft-ui.<namespace>.svc.cluster.local:8058
+apiVersion: v1
+kind: Service
+metadata:
+  name: draft-ui
+  namespace: default
+  labels:
+    app: draft-ui
+spec:
+  type: ClusterIP
+  selector:
+    app: draft-ui
+  ports:
+    - port: 8058
+      targetPort: 8058
+      protocol: TCP
+      name: http

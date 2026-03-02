@@ -7,8 +7,13 @@ import urllib.request
 
 
 def _ollama_base() -> str:
-    """Base URL for Ollama API. Use OLLAMA_HOST (e.g. host.docker.internal:11434) when running in Docker."""
-    raw = os.environ.get("OLLAMA_HOST", "localhost:11434").strip()
+    """Base URL for Ollama API. Prefer DRAFT_LLM_ENDPOINT (unified), else OLLAMA_HOST (e.g. host.docker.internal:11434)."""
+    endpoint = (os.environ.get("DRAFT_LLM_ENDPOINT") or "").strip().strip("'\"")
+    if endpoint:
+        if endpoint.startswith("http://") or endpoint.startswith("https://"):
+            return endpoint.rstrip("/")
+        return "http://" + endpoint
+    raw = (os.environ.get("OLLAMA_HOST") or "localhost:11434").strip()
     if raw.startswith("http://") or raw.startswith("https://"):
         return raw.rstrip("/")
     return "http://" + raw

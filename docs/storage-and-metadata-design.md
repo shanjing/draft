@@ -52,7 +52,7 @@ flowchart TB
 
   subgraph intel["Intelligence layer (existing)"]
     whoosh["Whoosh\n(.search_index/)"]
-    chroma["ChromaDB\n(.vector_store/)"]
+    chroma["ChromaDB\n(DRAFT_HOME/.vector_store/)"]
     llm["LLM\n(Claude / Ollama)"]
     docs --> whoosh
     docs --> chroma
@@ -122,7 +122,7 @@ The following vault behavior is implemented and reflected in the diagram above.
 | **Vault** | **`~/.draft/vault/`** (or `DRAFT_HOME/vault/`) | **Separate from .doc_sources.** Entry in `sources.yaml`; filled via UI drop/click → `POST /api/vault/upload`. Append-only; no delete. Can later be backed by S3, iCloud, etc. Not written by pull. |
 | **Doc store (filesystem)** | **`~/.draft/.doc_sources/<source_id>/`** | Pull/copy writes here (GitHub fetch, local copy). Vault is *not* here. The meta layer sits on top. |
 | **File registry** | `.draft/file_registry.json` (path in manifest) | **Not yet implemented.** Planned: list of known files with hash + source_id + relative path (for re-link). |
-| **Vector store** | `.vector_store/` (Chroma) | Stores chunk embeddings + metadata; chunk metadata includes `source_id`, `path`, and **content_hash** (see below). |
+| **Vector store** | `DRAFT_HOME/.vector_store/` (Chroma) | Stores chunk embeddings + metadata; chunk metadata includes `source_id`, `path`, and **content_hash** (see below). |
 | **Search index** | `.search_index/` (Whoosh) | Full-text index; can be rebuilt from `~/.draft/.doc_sources` (and vault) if needed. |
 
 ---

@@ -59,7 +59,7 @@ docker run -p 8058:8058 \
 
 Replace `/path/to/draft/repo` with your Draft repo path (e.g. the directory that contains `draft.sh`). Without `OLLAMA_HOST`, the app uses `localhost:11434` (the container’s own loopback), so Ollama on the host won’t be reachable.
 
-**Easiest:** run **`./setup.sh`** and choose **6) Run Draft in a Docker container** — it detects local vs cloud LLM, creates `.env.docker` when using Ollama, stops any running container, then starts a new one. Full details: [docs/docker-guide.md](docs/docker-guide.md).
+**Easiest:** run **`./setup.sh`** and choose **7) Run Draft in a Docker container** — it detects local vs cloud LLM, creates `.env.docker` when using Ollama, stops any running container, then starts a new one. Full details: [docs/container-orchestration-guide.md](docs/container-orchestration-guide.md).
 
 ## Where documents are stored (`~/.draft`)
 
@@ -116,13 +116,15 @@ For maximum privacy, use **Ollama** and keep **`HF_HUB_OFFLINE=1`** in **`.env`*
 
 3. **Walks you through adding sources** — you can add a local path or a GitHub repo URL. The script runs `pull.py -a` under the hood.
 
-4. **Configures the LLM for Ask (AI)** — if Ollama is installed, it can suggest the Qwen3 model set (embed + reranker) and offer presets: **G** (Gold: 8b embed + 0.6B reranker), **L** (8B+8B), **S** (0.6B+0.6B). Otherwise you can choose a cloud provider (Claude, Gemini, OpenAI) and enter an API key. Choices are written to **`.env`**. If you run Draft in Docker, restart the container (option 6) to pick up a new LLM.
+4. **Setup embedding model** (option 2) — shows current model, suggests three Hugging Face models (e.g. `all-MiniLM-L6-v2`, `BAAI/bge-small-en-v1.5`, `mixedbread-ai/mxbai-embed-large-v1`), lists local Ollama embedding models, and allows typing a custom Hugging Face model (e.g. `org/model-name`). When the embed model changes, reminds you to rebuild the RAG index (option 5).
 
-5. **Builds the RAG index** — after setup, it runs the AI index build once so Ask (AI) works immediately.
+5. **Configures the LLM for Ask (AI)** (option 4) — if Ollama is installed, it can suggest the Qwen3 model set (embed + reranker) and offer presets: **G** (Gold: 8b embed + 0.6B reranker), **L** (8B+8B), **S** (0.6B+0.6B). Otherwise you can choose a cloud provider (Claude, Gemini, OpenAI) and enter an API key. Choices are written to **`.env`**. If you run Draft in Docker, restart the container (option 6) to pick up a new LLM.
 
-6. **Run in Docker** — runs the `draft-ui` container with your data and LLM config; detects local vs cloud LLM, stops any existing container, then starts a new one. See [docs/docker-guide.md](docs/docker-guide.md).
+6. **Builds the RAG index** — after setup, it runs the AI index build once so Ask (AI) works immediately.
 
-You can re-run **`./setup.sh`** anytime to add more sources or change the LLM. To tweak config by hand, edit **`.env`** (embed model, cross-encoder, LLM provider, API keys). See **`docs/RAG_operations.md`** for CLI commands (index build, ask, pipeline test).
+7. **Run in Docker** — runs the `draft-ui` container with your data and LLM config; detects local vs cloud LLM, stops any existing container, then starts a new one. See [docs/container-orchestration-guide.md](docs/container-orchestration-guide.md).
+
+You can re-run **`./setup.sh`** anytime to add more sources or change the LLM. To tweak config by hand, edit **`.env`** (embed model, cross-encoder, LLM provider, API keys). See **`docs/RAG_operations.md`** for how to change models and run RAG tests (setup option 6, ask.py, pipeline test, CI/CD).
 
 ---
 
@@ -136,9 +138,9 @@ The **`docs/`** folder contains design and operations docs you can use as refere
 | [Core implementations](docs/core-implementations.md) | Source type taxonomy, storage layout under `DRAFT_HOME`, manifest |
 | [Design principles](docs/design-principles.md) | Data sources and operations (github, local_dir, local_git, vault, etc.) |
 | [Intelligence layer design](docs/intelligence-layer-design.md) | Embeddings, Chroma, LLM integration, RAG pipeline |
-| [RAG design principles](docs/RAG-design-principles.md) | RAG goals, architecture, chunking, citations, local vs cloud |
-| [RAG operations](docs/RAG_operations.md) | Default models, Qwen3 pairs (G/L/S), CLI: index build, ask, pipeline test |
-| [Docker guide](docs/docker-guide.md) | Run in Docker (option 6), OLLAMA_HOST, mounts, K8s plan |
+| [RAG design principles](docs/RAG-design-principles.md) | RAG goals, architecture, chunking, citations, two-stage retrieval (bi-encoder + cross-encoder), model performance & privacy |
+| [RAG operations](docs/RAG_operations.md) | How to change embed/encoder models; how to run tests (setup option 6, ask.py, test_pipeline, CI/CD) |
+| [Container orchestration](docs/container-orchestration-guide.md) | Docker and Kubernetes deployment, unified LLM endpoint, example manifests in `deployment/` |
 | [Local oracle design](docs/local-oracle-design.md) | When and how a local LLM is used for Ask (AI) |
 | [Testing suites](docs/testing-suites.md) | Test layers, pytest, pipeline test (`test_pipeline.py`), curl integration |
 

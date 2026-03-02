@@ -1,0 +1,18 @@
+# PersistentVolumeClaim for Draft UI: data (includes HF cache at DRAFT_HOME/.cache/huggingface).
+# Apply before Deployment: kubectl apply -f deployment/pvc.yaml
+# Adjust storageClassName and size for your cluster.
+# Size: 4 Gi (2x of data ~500 MB + HF cache ~1 GB). See container-orchestration-guide.md.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: draft-data-pvc
+  namespace: default
+  labels:
+    app: draft-ui
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 4Gi
+  # storageClassName: standard

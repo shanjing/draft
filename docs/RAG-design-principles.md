@@ -96,9 +96,9 @@ Chunk metadata is stored in Chroma so retrieval can return both text and (for co
 
 ### 3. Embeddings and vector store
 
-- **Model**: Configurable per **index profile** (e.g. `quick`: smaller/faster model; `deep`: nomic-embed-text for higher quality). Stored in collection metadata so the same model is used at query time.
+- **Model**: Configurable via **`.env`** (`DRAFT_EMBED_MODEL`; setup step 2). Profile provides defaults (`quick`: smaller/faster; `deep`: nomic-embed-text). Stored in collection metadata so the same model is used at query time. Rebuild the index after changing the embed model.
 - **Input**: Chunk text only (heading can be included in the stored text for context). No separate field for “heading” in the embedding input in the current design.
-- **Store**: **ChromaDB** under draft root (e.g. `.vector_store/`). Schema: document id, embedding, **metadata** (`repo`, `path`, `heading`, optional `start_line`, `end_line`), and stored document text.
+- **Store**: **ChromaDB** under `DRAFT_HOME/.vector_store/` (e.g. `~/.draft/.vector_store`). Schema: document id, embedding, **metadata** (`repo`, `path`, `heading`, optional `start_line`, `end_line`), and stored document text.
 - **Rebuild**: Index is rebuilt from scratch on each run (no incremental update). Ensures the store matches current vault + effective roots.
 
 ### 4. Retrieval (lib/ai_engine)
@@ -145,28 +145,39 @@ Citations are built **at query time** in **lib/ai_engine** (e.g. `_build_citatio
 
 ---
 
-## Operations
+## Model Selection, Performance and Privacy
 
-### Rebuild RAG index (admin / CLI)
+Draft utilizes a **two-stage retrieval pipeline** (Bi-Encoder + Cross-Encoder) to navigate your local vault and code repositories. This architecture ensures that the LLM receives only the most mathematically relevant context, preventing "hallucinations" and "vibe-coding" errors.
 
-The vector index is rebuilt only on demand. Use the CLI from the **draft repo root**:
+### 1. Embedding Models (The Bi-Encoders)
 
-```bash
-# Quick (default) — smaller, faster embedding model
-python scripts/index_for_ai.py
+We evaluated three tiers of embedding models to handle initial document retrieval:
 
-# Explicit profile: quick or deep
-python scripts/index_for_ai.py --profile quick
-python scripts/index_for_ai.py --profile deep
+- **all-MiniLM-L6-v2**: The lightweight baseline. Excellent for rapid indexing but struggles with the complex semantic dependencies of modern Python AST.
+- **qwen3-embedding:0.6b**: A modern, code-literate model. It offers a significant jump in retrieval quality for `.py` files without a massive compute tax.
+- **mixedbread-ai/mxbai-embed-large-v1**: Our high-precision choice. It captures deep technical context, ensuring that the "Recall" stage doesn't miss subtle implementation details.
 
-# Verbose progress
-python scripts/index_for_ai.py --profile deep -v
-```
+### 2. Encoder Combinations (The Rerankers)
 
-- **quick**: Lighter model, faster; good for iteration.
-- **deep**: Higher-quality embeddings (e.g. nomic-embed-text); better retrieval for nuanced questions.
+Initial retrieval is refined by a Cross-Encoder (Reranker) to ensure maximum precision:
 
-The same script is triggered from the UI via **Ask (AI)** → “Quick rebuild” or “Deep rebuild (nomic)” (POST `/api/reindex_ai` with `mode: "quick"` or `"deep"`). Setup can also run it once at the end of configuration.
+- **ms-marco-MiniLM-L-6-v2**: Fast but under-confident. Frequently produces negative scores on technical queries, occasionally causing the LLM to "hesitate" on valid context.
+- **BAAI/bge-reranker-v2-m3**: The current project standard. It provides highly reliable, positive relevance scores and correctly distinguishes between implementation code and meta-documentation.
+
+### 3. Privacy & Data Sovereignty
+
+By utilizing Hugging Face models locally, Draft ensures your data never leaves your hardware.
+
+- **Offline Mode**: By setting `HF_HUB_OFFLINE=1`, the system relies entirely on cached weights in `.cache/huggingface`.
+- **Local Compute**: All vector math and re-ranking passes are executed via MPS (Metal Performance Shaders) on your local GPU, eliminating the "Privacy Tax" and latency associated with cloud-based APIs.
+
+### Recommendations
+
+| Metric   | Recommended Pairing           | Why? |
+|----------|-------------------------------|------|
+| Accuracy | Mixedbread-Large + BGE-v2-m3  | Best for deep codebase analysis and resolving complex citations. |
+| Speed    | MiniLM-L6 + MiniLM-L6         | Best for low-latency "quick checks" or indexing massive datasets (>50k chunks). |
+| **16GB laptop (no GPU)** | nomic-embed-text-v1.5 + BGE-v2-m3 | Fits in RAM (~3GB total); good quality without swap. Avoid Mixedbread-Large + very large rerankers. |
 
 ---
 

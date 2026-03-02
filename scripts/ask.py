@@ -15,14 +15,13 @@ os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 # Draft repo root = parent of scripts/
 SCRIPT_DIR = Path(__file__).resolve().parent
 DRAFT_ROOT = SCRIPT_DIR.parent
-
-# Use project-local cache for HuggingFace (cross-encoder)
-_cache = DRAFT_ROOT / ".cache" / "huggingface"
-_cache.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("HF_HOME", str(_cache))
-
-# Ensure lib is importable
 sys.path.insert(0, str(DRAFT_ROOT))
+
+# HF cache under DRAFT_HOME so models persist in Docker and avoid re-downloads
+from lib.paths import get_hf_cache_root
+_cache = get_hf_cache_root()
+_cache.mkdir(parents=True, exist_ok=True)
+os.environ["HF_HOME"] = str(_cache)
 
 # Load .env from repo root
 try:
@@ -30,7 +29,8 @@ try:
     load_dotenv(DRAFT_ROOT / ".env")
 except ImportError:
     pass
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
+# Allow Hugging Face to download encoder/embed models from .env when not cached
+os.environ["HF_HUB_OFFLINE"] = "0"
 
 from lib.ai_engine import ask_stream, llm_ready
 from lib.log import configure_cli
@@ -65,10 +65,19 @@ def main(query: str, debug: bool, show_prompt: bool) -> None:
             ))
             click.echo()
         elif kind == "prompt":
-            click.echo("--- Final prompt to LLM ---")
+            click.echo("\033[1;33m--- Final prompt to LLM ---\033[0m")
             click.echo("\n[System]\n%s" % (payload.get("system", ""),))
-            click.echo("\n[User]\n%s" % (payload.get("user", ""),))
-            click.echo("\n---\n")
+            user_content = payload.get("user", "")
+            click.echo("\n[User]")
+            _yellow, _reset = "\033[1;33m", "\033[0m"
+            for line in user_content.split("\n"):
+                if line.strip().startswith("Question:"):
+                    click.echo(_yellow + line + _reset)
+                else:
+                    click.echo(line)
+            click.echo()
+            click.echo("\033[1;33m--- End of prompt to LLM ---\033[0m")
+            click.echo()
         elif kind == "text":
             full_text += payload
         elif kind == "citations":
@@ -80,7 +89,10 @@ def main(query: str, debug: bool, show_prompt: bool) -> None:
         click.echo(error_msg, err=True)
         sys.exit(1)
 
-    click.echo(full_text or "(No answer.)")
+    _green, _reset = "\033[0;32m", "\033[0m"
+    _answer_text = (full_text or "(No answer.)").strip()
+    click.echo(_green + "Answer:" + _reset)
+    click.echo(_answer_text)
     if citations:
         click.echo()
         click.echo("---")
@@ -91,7 +103,7 @@ def main(query: str, debug: bool, show_prompt: bool) -> None:
             if c.get("start_line") is not None and c.get("end_line") is not None:
                 label += f" (lines {c['start_line']}–{c['end_line']})"
             if c.get("score") is not None:
-                label += f" [score: {c['score']}]"
+                label += f" \033[1;33m[score: {c['score']}]\033[0m"
             click.echo(f"  {i}. {label}")
 
 

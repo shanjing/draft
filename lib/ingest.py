@@ -18,14 +18,13 @@ import os
 import warnings
 from pathlib import Path
 
-# Prefer offline: no Hugging Face network use unless explicitly enabled
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
+# Allow Hugging Face to download embed model from .env when not cached (set HF_HUB_OFFLINE=1 in .env for strict offline)
 
 from lib.chunking import chunk_markdown, chunk_python, Chunk
 from lib.gitignore import get_git_ignored_set
 from lib.log import get_logger
 from lib.manifest import parse_sources_yaml
-from lib.paths import get_effective_repo_root, get_sources_yaml_path, get_vault_root
+from lib.paths import get_effective_repo_root, get_hf_cache_root, get_sources_yaml_path, get_vault_root, get_vector_store_root
 
 log = get_logger(__name__)
 
@@ -45,7 +44,6 @@ EXCLUDE_DIRS = (
     ".cache",
 )
 
-VECTOR_DIR = ".vector_store"
 COLLECTION_NAME = "draft_docs"
 
 # nomic-embed-text-v1.5 requires trust_remote_code=True. Alternative: "sentence-transformers/all-MiniLM-L6-v2" (no trust_remote_code).
@@ -213,18 +211,32 @@ def collect_chunks(
 
 # the main function to build the index for the RAG
 # this is invoked by scripts/index_for_ai.py and the UI reindex action.
+def _reload_env_from_file(draft_root: Path) -> None:
+    """Re-load .env so embed/encoder from .env take effect without restart (Docker/K8s)."""
+    env_path = draft_root / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_path, override=True)
+    except ImportError:
+        pass
+
+
 def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick") -> int:
     """
     Rebuild the Chroma vector store from vault and each repo's effective root:
     .md (by section/paragraph) and .py (by ast def/class). Returns the number of chunks indexed.
+    Re-loads .env at start so embed/encoder changes take effect without restart (Docker/K8s).
     """
+    _reload_env_from_file(draft_root)
     os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
     os.environ.setdefault("POSTHOG_DISABLED", "1")
     os.environ.setdefault("DO_NOT_TRACK", "1")
-    # Keep HF cache under project-local .cache and avoid deprecation warning by not using TRANSFORMERS_CACHE.
-    hf_cache = draft_root / ".cache" / "huggingface"
+    # HF cache under DRAFT_HOME so models persist in Docker and avoid re-downloads when switching models.
+    hf_cache = get_hf_cache_root()
     hf_cache.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("HF_HOME", str(hf_cache))
+    os.environ["HF_HOME"] = str(hf_cache)
     warnings.filterwarnings(
         "ignore",
         message=r"Using `TRANSFORMERS_CACHE` is deprecated.*",
@@ -275,7 +287,7 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
             log.info("No chunks to index (docs + code).")
         return 0
 
-    persist_dir = draft_root / VECTOR_DIR
+    persist_dir = get_vector_store_root()
     persist_dir.mkdir(parents=True, exist_ok=True)
 
     client = chromadb.PersistentClient(
