@@ -48,6 +48,9 @@ try:
     load_dotenv(DRAFT_ROOT / ".env")
 except ImportError:
     pass
+# Use same DRAFT_HOME as CLI when unset (e.g. UI started from IDE). Avoids "No indexed documents" when index lives under ~/.draft.
+if not os.environ.get("DRAFT_HOME", "").strip():
+    os.environ["DRAFT_HOME"] = str(Path.home() / ".draft")
 # HF cache under DRAFT_HOME so models persist in Docker and avoid re-downloads
 from lib.paths import get_hf_cache_root
 _hf = get_hf_cache_root()

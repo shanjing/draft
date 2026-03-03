@@ -39,7 +39,7 @@
     { name: 'none',                file: null,                      label: 'None',           size: 'auto',  repeat: 'no-repeat' },
   ];
   function getBg() {
-    try { return localStorage.getItem(BG_KEY) || 'draft-bg'; } catch (e) { return 'draft-bg'; }
+    try { return localStorage.getItem(BG_KEY) || 'blug_night_sky'; } catch (e) { return 'blug_night_sky'; }
   }
   function setBg(name) {
     var bg = BG_IMAGES.find(function (b) { return b.name === name; }) || BG_IMAGES[0];
