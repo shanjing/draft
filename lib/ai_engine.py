@@ -139,22 +139,35 @@ def _get_embedding_model(embed_model: str | None = None, trust_remote_code: bool
 
 
 def _get_collection(draft_root: Path):
+    """Return Chroma collection for RAG. Tries DRAFT_HOME/.vector_store first, then draft_root/.vector_store so CLI and UI find the same index."""
     os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
     import numpy as np  # Chroma/DuckDB expect numpy to be available; load before chromadb
     import chromadb
     from chromadb.config import Settings
     from lib.paths import get_vector_store_root
+
+    def _try_collection(persist_dir: Path):
+        if not persist_dir.is_dir():
+            return None
+        client = chromadb.PersistentClient(
+            path=str(persist_dir),
+            settings=Settings(anonymized_telemetry=False),
+        )
+        try:
+            return client.get_collection(COLLECTION_NAME)
+        except Exception:
+            return None
+
     persist_dir = get_vector_store_root()
-    if not persist_dir.is_dir():
-        return None
-    client = chromadb.PersistentClient(
-        path=str(persist_dir),
-        settings=Settings(anonymized_telemetry=False),
-    )
-    try:
-        return client.get_collection(COLLECTION_NAME)
-    except Exception:
-        return None
+    coll = _try_collection(persist_dir)
+    if coll is not None:
+        return coll
+    # Fallback: repo .vector_store (CLI often builds here when run from repo; UI may have different DRAFT_HOME)
+    if draft_root:
+        coll = _try_collection(draft_root / ".vector_store")
+        if coll is not None:
+            return coll
+    return None
 
 
 def _get_cross_encoder(model_name: str | None = None):

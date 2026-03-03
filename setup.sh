@@ -954,6 +954,13 @@ do_start_ui_flow() {
   case "$start_ui" in
     [yY]|[yY][eE][sS])
       _UI_LOG="${DRAFT_HOME}/.draft-ui.log"
+      # Ensure restart really restarts: stop any existing Draft UI server on this repo.
+      _old_pids="$(pgrep -f "$SCRIPT_DIR/scripts/serve.py" 2>/dev/null || true)"
+      if [ -n "$_old_pids" ]; then
+        printf "  ${D}Stopping existing Draft UI process(es): %s${N}\n" "$(printf '%s' "$_old_pids" | tr '\n' ' ')"
+        kill $_old_pids 2>/dev/null || true
+        sleep 1
+      fi
       nohup "$PYTHON" "$SCRIPT_DIR/scripts/serve.py" >> "$_UI_LOG" 2>&1 &
       _UI_PID=$!
       ( sleep 2; case "$OS" in Darwin) open "http://localhost:8058" ;; *) xdg-open "http://localhost:8058" 2>/dev/null || true ;; esac ) &
