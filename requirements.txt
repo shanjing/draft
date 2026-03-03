@@ -2,6 +2,10 @@
 # NumPy must be <2 for PyTorch/sentence-transformers/Chroma binary compatibility.
 numpy>=1.24,<2
 
+# PyTorch: transformers 4.51+ and accelerate require torch>=2.4 (avoids "nn is not defined" on Intel Mac).
+# Install first so sentence-transformers gets a compatible torch. Works on: Mac (M4/Intel), Linux, Windows.
+torch>=2.4.0
+
 # Utilities
 tqdm>=4.66.0
 einops>=0.7.0

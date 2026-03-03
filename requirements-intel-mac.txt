@@ -1,0 +1,40 @@
+# Intel Mac (x86_64): PyTorch does not ship 2.4+ wheels for macOS Intel (deprecated).
+# So we use torch 2.2.x and pin transformers to <4.51 so the stack works without torch 2.4.
+#
+# Why does the main requirements.txt require torch 2.4?
+#   transformers 4.51+ (and accelerate integration) use PyTorch APIs that exist only in 2.4+
+#   (e.g. torch.is_autocast_enabled(device_type), type hints using nn.Module). With torch 2.2
+#   you get "nn is not defined" or "is_autocast_enabled() takes no arguments".
+#
+# This file: torch 2.2 + transformers 4.41..<4.51. Embed model all-MiniLM-L6-v2 works.
+# Qwen3 embed/reranker (transformers 4.51+) not supported on this stack; use main requirements on Linux/Windows/Apple Silicon.
+#
+# Install with: pip install -r requirements-intel-mac.txt
+
+# Python 3.11 or 3.12 recommended.
+numpy>=1.24,<2
+
+# PyTorch 2.2.x (last versions with Intel Mac wheels on PyPI).
+torch>=2.2.0
+
+# Utilities
+tqdm>=4.66.0
+einops>=0.7.0
+pytest>=7.0.0
+python-multipart>=0.0.22
+python-dotenv>=1.0.0
+click>=8.0
+fastapi>=0.100
+uvicorn[standard]>=0.22
+
+# RAG (embed_model e.g. sentence-transformers/all-MiniLM-L6-v2). transformers<4.51 for torch 2.2 compatibility.
+whoosh>=2.7
+chromadb>=0.4.22,<0.6
+sentence-transformers>=4.37.0
+transformers>=4.41.0,<4.51.0
+tokenizers>=0.13.2
+
+# AI
+anthropic>=0.18.0
+openai>=1.0.0
+google-generativeai>=0.8.0
