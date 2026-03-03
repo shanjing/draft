@@ -144,10 +144,12 @@ The **`docs/`** folder contains design and operations docs you can use as refere
 | [Local oracle design](docs/local-oracle-design.md) | When and how a local LLM is used for Ask (AI) |
 | [Testing suites](docs/testing-suites.md) | Test layers, pytest, pipeline test (`test_pipeline.py`), curl integration |
 
+RAG test:
+<img width="1226" height="962" alt="Screenshot 2026-03-02 at 6 56 46 PM" src="https://github.com/user-attachments/assets/e8d0b6e9-88a5-458c-8303-e85ef88357d2" />
+<img width="1383" height="293" alt="Screenshot 2026-03-02 at 6 57 27 PM" src="https://github.com/user-attachments/assets/6767020b-eec1-488c-ba3c-4cde87d2f186" />
+
+UI:
 <img width="2037" height="1147" alt="Screenshot 2026-02-27 at 9 36 12 AM" src="https://github.com/user-attachments/assets/28a26c52-cc49-4421-8fd1-20ef0638daf0" />
-
-<img width="1925" height="1043" alt="Screenshot 2026-02-27 at 9 39 10 AM" src="https://github.com/user-attachments/assets/4b0a7aad-e733-4c0d-a40c-68e1d5a23b1c" />
-
 <img width="1707" height="1027" alt="Screenshot 2026-02-26 at 10 59 40 PM" src="https://github.com/user-attachments/assets/82c5d7b9-17a9-453a-8c53-412162d117bf" />
 
 
