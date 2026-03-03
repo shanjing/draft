@@ -28,18 +28,17 @@
 
   var BG_KEY = 'draft-bg-image';
   var BG_IMAGES = [
-    { name: 'draft-bg',            file: 'draft-bg.jpg',            label: 'Chalk',          size: 'auto',  repeat: 'repeat' },
-    { name: 'draft-bg-bright',     file: 'draft-bg-bright.jpg',     label: 'Sketch',         size: 'auto',  repeat: 'repeat' },
-    { name: 'background_1_dark',   file: 'background_1_dark.jpg',   label: 'Dark texture',   size: 'cover', repeat: 'no-repeat' },
-    { name: 'background_1_bright', file: 'background_1_bright.jpg', label: 'Bright texture', size: 'cover', repeat: 'no-repeat' },
-    { name: 'abstract_earth',      file: 'abstract_earth.jpg',      label: 'Abstract earth', size: 'cover', repeat: 'no-repeat' },
-    { name: 'background_2',        file: 'background_2.jpg',        label: 'Watercolor',     size: 'cover', repeat: 'no-repeat' },
-    { name: 'blug_night_sky',      file: 'blug_night_sky.jpg',      label: 'Night sky',      size: 'cover', repeat: 'no-repeat' },
-    { name: 'bluish-paint',        file: 'bluish-paint.jpg',        label: 'Bluish paint',   size: 'cover', repeat: 'no-repeat' },
-    { name: 'none',                file: null,                      label: 'None',           size: 'auto',  repeat: 'no-repeat' },
+    { name: 'sky-earth',   file: 'sky-earth.jpg',   label: 'Sky & Earth', size: 'cover', repeat: 'no-repeat' },
+    { name: 'galaxy',      file: 'galaxy.jpg',      label: 'Galaxy',      size: 'cover', repeat: 'no-repeat' },
+    { name: 'space',       file: 'space.jpg',       label: 'Space',       size: 'cover', repeat: 'no-repeat' },
+    { name: 'star',        file: 'star.jpg',        label: 'Star',        size: 'cover', repeat: 'no-repeat' },
+    { name: 'apple',       file: 'apple.jpg',       label: 'Apple',       size: 'cover', repeat: 'no-repeat' },
+    { name: '1980s_dark',  file: '1980s_dark.jpg',  label: '1980s Dark',  size: 'cover', repeat: 'no-repeat' },
+    { name: '1980s_bright',file: '1980s_bright.jpg',label: '1980s Bright',size: 'cover', repeat: 'no-repeat' },
+    { name: 'none',        file: null,              label: 'None',         size: 'auto',  repeat: 'no-repeat' },
   ];
   function getBg() {
-    try { return localStorage.getItem(BG_KEY) || 'blug_night_sky'; } catch (e) { return 'blug_night_sky'; }
+    try { return localStorage.getItem(BG_KEY) || 'sky-earth'; } catch (e) { return 'sky-earth'; }
   }
   function setBg(name) {
     var bg = BG_IMAGES.find(function (b) { return b.name === name; }) || BG_IMAGES[0];

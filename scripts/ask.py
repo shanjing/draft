@@ -89,13 +89,15 @@ def main(query: str, debug: bool, show_prompt: bool) -> None:
         click.echo(error_msg, err=True)
         sys.exit(1)
 
-    _green, _reset = "\033[0;32m", "\033[0m"
+    _yellow, _reset = "\033[1;33m", "\033[0m"
     _answer_text = (full_text or "(No answer.)").strip()
-    click.echo(_green + "Answer:" + _reset)
+    click.echo(_yellow + "--- Answer from LLM ---" + _reset)
     click.echo(_answer_text)
+    click.echo(_yellow + "--- End of Answer ---" + _reset)
     if citations:
         click.echo()
         click.echo("---")
+        click.echo(_yellow + "--- Ranking Scores ---" + _reset)
         for i, c in enumerate(citations, 1):
             label = f"{c.get('repo', '')}/{c.get('path', '')}"
             if c.get("heading"):
