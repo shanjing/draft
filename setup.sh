@@ -361,16 +361,36 @@ except Exception:
     fi
     unset _has_content
   fi
+  # Embed/encoder/LLM: required when .env missing or value not set
+  _emb_val="$(env_val "DRAFT_EMBED_MODEL" "")"
+  _enc_val="$(env_val "DRAFT_CROSS_ENCODER_MODEL" "")"
+  if [ -z "$_emb_val" ]; then
+    printf "  ${Y}[required] Set embedding model in step 2 (Setup embedding model).${N}\n"
+    has_required=1
+  fi
+  if [ -z "$_enc_val" ]; then
+    printf "  ${Y}[required] Set encoder model in step 3 (Setup encoder model).${N}\n"
+    has_required=1
+  fi
+  unset _emb_val _enc_val
+  _llm_ok=0
   if [ -f "$SCRIPT_DIR/.env" ]; then
     _lp=$(grep -E '^[[:space:]]*DRAFT_LLM_PROVIDER[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
     _lm=$(grep -E '^[[:space:]]*OLLAMA_MODEL[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
     [ -z "$_lm" ] && _lm=$(grep -E '^[[:space:]]*DRAFT_LLM_MODEL[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
-    if [ -z "$_lp" ] && [ -z "$_lm" ] && [ -z "$(grep -E '^[[:space:]]*ANTHROPIC_API_KEY[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null)" ] && [ -z "$(grep -E '^[[:space:]]*GEMINI_API_KEY[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null)" ] && [ -z "$(grep -E '^[[:space:]]*OPENAI_API_KEY[[:space:]]*=' "$SCRIPT_DIR/.env" 2>/dev/null)" ]; then
-      printf "  ${Y}[suggested] Configure LLM in step 4 (Configure LLM).${N}\n"
-      has_suggested=1
-    fi
-    unset _lp _lm
+    [ -n "$_lp" ] && _llm_ok=1
+    [ -n "$_lm" ] && _llm_ok=1
+    for _k in ANTHROPIC_API_KEY GEMINI_API_KEY OPENAI_API_KEY; do
+      _v=$(grep -E "^[[:space:]]*${_k}[[:space:]]*=" "$SCRIPT_DIR/.env" 2>/dev/null | sed -E "s/^[^=]*=[[:space:]]*['\"]?//;s/['\"]?[[:space:]]*$//" | head -1)
+      [ -n "$_v" ] && _llm_ok=1
+    done
+    unset _lp _lm _k _v
   fi
+  if [ "$_llm_ok" -eq 0 ]; then
+    printf "  ${Y}[required] Configure LLM in step 4 (Configure LLM).${N}\n"
+    has_required=1
+  fi
+  unset _llm_ok
   if [ "$has_required" = "0" ] && [ "$has_suggested" = "0" ]; then
     printf "  ${Y}[None] You are good to go.${N}\n"
   fi
