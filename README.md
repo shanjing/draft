@@ -1,10 +1,10 @@
 # Draft
 
-Draft is a personal documentation hub. It pulls document files from your other repos and GitHub projects into one browsable place. You get a unified view of scattered docs — engineering notes, design specs, drafts — with full-text search and an AI assistant that answers questions from your content.
+Draft is a personal documentation hub. It pulls document files from your other repos and GitHub projects into one browsable place. You get a unified view of scattered docs — engineering notes, design specs, drafts — with full-text search and a local RAG + LLM that answers questions from your content.
 
-No cloud sync. Your docs stay local. Draft works with or without an LLM — Ollama for fully offline use, or Claude, OpenAI, and Gemini.
+Draft works with or without an LLM — Ollama for fully offline use. RAG embed/encoder/reranker models are downloaded from huggingface and run 100% locally.
 
-Draft is also an MCP server. [TODO] 
+Draft is also an MCP server that serves contents to internal AI Agents.
 
 ## Get started (quickest way)
 
