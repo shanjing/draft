@@ -28,6 +28,20 @@ Y='\033[1;33m'
 D='\033[0;90m'
 N='\033[0m'
 
+# Pick requirements file by host: Intel Mac (Darwin x86_64) uses requirements-intel-mac.txt (torch 2.2 + older transformers).
+REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
+pick_requirements_file() {
+  local os arch
+  os="$(uname -s)"
+  arch="$(uname -m)"
+  if [ "$os" = "Darwin" ] && [ "$arch" = "x86_64" ]; then
+    REQUIREMENTS_FILE="$SCRIPT_DIR/requirements-intel-mac.txt"
+  else
+    REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
+  fi
+}
+pick_requirements_file
+
 # Prefer Python 3.12 or 3.11 for ChromaDB/sentence-transformers (3.14 not supported)
 find_python() {
   for py in python3.12 python3.11 python3; do
@@ -61,8 +75,8 @@ if [ ! -d "$SCRIPT_DIR/.venv" ]; then
   "$PYEXE" -m venv "$SCRIPT_DIR/.venv"
   printf "  ${G}✓${N} .venv created\n"
   bash "$SCRIPT_DIR/scripts/install_venv_banner.sh" 2>/dev/null || true
-  printf "${D}[2/2] Installing dependencies${N}\n"
-  "$SCRIPT_DIR/.venv/bin/pip" install --progress-bar on -r "$SCRIPT_DIR/requirements.txt"
+  printf "${D}[2/2] Installing dependencies (%s)${N}\n" "$(basename "$REQUIREMENTS_FILE")"
+  "$SCRIPT_DIR/.venv/bin/pip" install --progress-bar on -r "$REQUIREMENTS_FILE"
   printf "  ${G}✓${N} requirements installed\n"
   echo ""
 fi
@@ -891,7 +905,7 @@ except Exception:
   fi
   if [ "$build_rag" = "1" ]; then
     printf "${D}Build RAG/vector index ...${N}\n"
-    "$SCRIPT_DIR/.venv/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt" 2>/dev/null || true
+    "$SCRIPT_DIR/.venv/bin/pip" install -q -r "$REQUIREMENTS_FILE" 2>/dev/null || true
     if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/index_for_ai.py --profile "$rag_profile" -v); then
       printf "${G}done.${N}\n"
       _emb="$(env_val "DRAFT_EMBED_MODEL" "$DEFAULT_EMBED_MODEL")"
