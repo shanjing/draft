@@ -59,7 +59,7 @@ docker run -p 8058:8058 \
 
 Replace `/path/to/draft/repo` with your Draft repo path (e.g. the directory that contains `draft.sh`). Without `OLLAMA_HOST`, the app uses `localhost:11434` (the container’s own loopback), so Ollama on the host won’t be reachable.
 
-**Easiest:** run **`./setup.sh`** and choose **7) Run Draft in a Docker container** — it detects local vs cloud LLM, creates `.env.docker` when using Ollama, stops any running container, then starts a new one. Full details: [docs/container-orchestration-guide.md](docs/container-orchestration-guide.md).
+**Easiest:** run **`./setup.sh`** and choose **8) Run Draft in a Docker container** — it detects local vs cloud LLM, creates `.env.docker` when using Ollama, stops any running container, then starts a new one. Full details: [docs/container-orchestration-guide.md](docs/container-orchestration-guide.md).
 
 ## Where documents are stored (`~/.draft`)
 
@@ -101,7 +101,7 @@ The **vault** lives at **`~/.draft/vault/`** (or **`$DRAFT_HOME/vault/`**). It i
 Draft is built so you can run **everything locally** and keep your docs and queries off the network when you want.
 
 - **Hugging Face offline:** Draft sets **`HF_HUB_OFFLINE=1`** in **`.env`** (and uses it by default in code). Hugging Face models (embeddings, cross-encoder) then use only already-downloaded or local assets — no outbound calls to Hugging Face Hub. Setup and the app ensure this is set so RAG stays local.
-- **Local LLM:** When resources allow, use **Ollama** with a local model (e.g. Qwen3 embed + reranker). **`./setup.sh`** can configure an all-local stack (embed + rerank + chat via Ollama). No doc content or queries are sent to the internet.
+- **Local LLM:** When resources allow, use **Ollama** with a local model. **`./setup.sh`** can configure an all-local stack (embed + cross-encoder rerank + chat via Ollama). No doc content or queries are sent to the internet.
 - **Optional cloud:** You can still choose a cloud LLM (Claude, Gemini, OpenAI) in setup; only then are prompts and answers sent to the provider you configured.
 
 For maximum privacy, use **Ollama** and keep **`HF_HUB_OFFLINE=1`** in **`.env`** so indexing and Ask (AI) run fully on your machine.
@@ -110,19 +110,25 @@ For maximum privacy, use **Ollama** and keep **`HF_HUB_OFFLINE=1`** in **`.env`*
 
 **`./setup.sh`** is the main one-time (or re-run) setup script. It:
 
-1. **Creates the environment** — ensures `.venv` exists and installs dependencies from `requirements.txt`. Uses Python 3.11 or 3.12 when available (ChromaDB/sentence-transformers need it for Ask (AI)). Use **`./setup.sh --recreate`** to rebuild the venv (e.g. after switching Python version).
+1. **Creates the environment** — ensures `.venv` exists and installs dependencies from `requirements.txt`. Uses Python 3.11 or 3.12 when available (ChromaDB/sentence-transformers need it for Ask (AI)). Use **`./setup.sh --recreate`** to rebuild the venv (e.g. after switching Python version or upgrading PyTorch for Intel Mac / PC compatibility).
 
 2. **Ensures `~/.draft/sources.yaml`** — copies from `sources.example.yaml` if missing. This file is your list of document sources (local paths or GitHub URLs).
 
-3. **Walks you through adding sources** — you can add a local path or a GitHub repo URL. The script runs `pull.py -a` under the hood.
+3. **Walks you through adding sources** (option 1) — you can add a local path or a GitHub repo URL. The script runs `pull.py -a` under the hood.
 
-4. **Setup embedding model** (option 2) — shows current model, suggests three Hugging Face models (e.g. `all-MiniLM-L6-v2`, `BAAI/bge-small-en-v1.5`, `mixedbread-ai/mxbai-embed-large-v1`), lists local Ollama embedding models, and allows typing a custom Hugging Face model (e.g. `org/model-name`). When the embed model changes, reminds you to rebuild the RAG index (option 5).
+4. **Setup embedding model** (option 2) — shows current model, suggests three Hugging Face models (`all-MiniLM-L6-v2`, `BAAI/bge-small-en-v1.5`, `mixedbread-ai/mxbai-embed-large-v1`), lists local Ollama embedding models, and allows typing a custom Hugging Face model. When the embed model changes, reminds you to rebuild the RAG index (option 5).
 
-5. **Configures the LLM for Ask (AI)** (option 4) — if Ollama is installed, it can suggest the Qwen3 model set (embed + reranker) and offer presets: **G** (Gold: 8b embed + 0.6B reranker), **L** (8B+8B), **S** (0.6B+0.6B). Otherwise you can choose a cloud provider (Claude, Gemini, OpenAI) and enter an API key. Choices are written to **`.env`**. If you run Draft in Docker, restart the container (option 6) to pick up a new LLM.
+5. **Setup encoder model** (option 3) — configures the cross-encoder for reranking (default: `cross-encoder/ms-marco-MiniLM-L-6-v2`). You can accept the default or type a different model.
 
-6. **Builds the RAG index** — after setup, it runs the AI index build once so Ask (AI) works immediately.
+6. **Configure LLM for Ask (AI)** (option 4) — lists local Ollama models (from `ollama list`), or cloud options (Gemini 2.5 Flash, Claude/Opus, OpenAI), or lets you enter a custom model. Choices are written to **`.env`**. If you run Draft in Docker, restart the container (option 8) to pick up a new LLM.
 
-7. **Run in Docker** — runs the `draft-ui` container with your data and LLM config; detects local vs cloud LLM, stops any existing container, then starts a new one. See [docs/container-orchestration-guide.md](docs/container-orchestration-guide.md).
+7. **Build RAG index** (option 5) — after setup, runs the AI index build (quick or deep profile) so Ask (AI) works immediately.
+
+8. **Test RAG + LLM** (option 6) — runs a sample Ask with the configured models to verify the pipeline.
+
+9. **Start UI** (option 7, default) — starts the Draft UI on the local host.
+
+10. **Run in Docker** (option 8) — runs the `draft-ui` container with your data and LLM config; detects local vs cloud LLM, stops any existing container, then starts a new one. See [docs/container-orchestration-guide.md](docs/container-orchestration-guide.md).
 
 You can re-run **`./setup.sh`** anytime to add more sources or change the LLM. To tweak config by hand, edit **`.env`** (embed model, cross-encoder, LLM provider, API keys). See **`docs/RAG_operations.md`** for how to change models and run RAG tests (setup option 6, ask.py, pipeline test, CI/CD).
 
