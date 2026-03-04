@@ -24,7 +24,7 @@ import subprocess
 
 import click
 
-EXCLUDE_TOPLEVEL = {"README.md"}
+EXCLUDE_TOPLEVEL: set[str] = set()
 EXCLUDE_BASENAME = {"CLAUDE.md"}
 EXCLUDE_DIRS = (
     ".claude",
