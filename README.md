@@ -156,7 +156,8 @@ RAG test:
 
 UI:
 <img width="2037" height="1147" alt="Screenshot 2026-02-27 at 9 36 12 AM" src="https://github.com/user-attachments/assets/28a26c52-cc49-4421-8fd1-20ef0638daf0" />
-<img width="1707" height="1027" alt="Screenshot 2026-02-26 at 10 59 40 PM" src="https://github.com/user-attachments/assets/82c5d7b9-17a9-453a-8c53-412162d117bf" />
+
+<img width="1513" height="1111" alt="Screenshot 2026-03-04 at 12 07 04 AM" src="https://github.com/user-attachments/assets/3009276b-d8af-4e7d-8999-ed38e36d0677" />
 
 
 
