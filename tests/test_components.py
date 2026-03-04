@@ -54,9 +54,9 @@ class TestChunking:
 class TestIngest:
     """lib.ingest: should_include, collect_chunks, build_index."""
 
-    def test_should_include_excludes_readme(self):
+    def test_should_include_allows_readme(self):
         from lib.ingest import should_include
-        assert should_include("README.md") is False
+        assert should_include("README.md") is True
 
     def test_should_include_excludes_claude_md(self):
         from lib.ingest import should_include

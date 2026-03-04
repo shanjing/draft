@@ -11,12 +11,18 @@ There are two main functions in this module:
 Note:
 It uses same file exclusions as scripts/pull.py. Rebuilds the collection on each run.
 """
+import chromadb
 import contextlib
 import io
 import logging
 import os
 import warnings
 from pathlib import Path
+
+from chromadb.config import Settings
+from sentence_transformers import SentenceTransformer
+from transformers.utils import logging as transformers_logging
+from huggingface_hub import logging as hf_logging
 
 # Allow Hugging Face to download embed model from .env when not cached (set HF_HUB_OFFLINE=1 in .env for strict offline)
 
@@ -29,7 +35,7 @@ from lib.paths import get_effective_repo_root, get_hf_cache_root, get_sources_ya
 log = get_logger(__name__)
 
 # Same exclusions as pull.py (do not depend on scripts)
-EXCLUDE_TOPLEVEL = {"README.md"}
+EXCLUDE_TOPLEVEL: set[str] = set()
 EXCLUDE_BASENAME = {"CLAUDE.md"}
 EXCLUDE_DIRS = (
     ".claude",
@@ -253,11 +259,6 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
             raise RuntimeError("NumPy 2.x not compatible. Run: pip install 'numpy<2'")
     except ImportError:
         pass
-    import chromadb
-    from chromadb.config import Settings
-    from sentence_transformers import SentenceTransformer
-    from transformers.utils import logging as transformers_logging
-    from huggingface_hub import logging as hf_logging
     try:
         from tqdm import tqdm
     except ImportError:
