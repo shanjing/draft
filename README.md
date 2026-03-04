@@ -148,6 +148,7 @@ The **`docs/`** folder contains design and operations docs you can use as refere
 | [RAG operations](docs/RAG_operations.md) | How to change embed/encoder models; how to run tests (setup option 6, ask.py, test_pipeline, CI/CD) |
 | [Container orchestration](docs/container-orchestration-guide.md) | Docker and Kubernetes deployment, unified LLM endpoint, example manifests in `deployment/` |
 | [Local oracle design](docs/local-oracle-design.md) | When and how a local LLM is used for Ask (AI) |
+| [MCP design](docs/MCP_design.md) | MCP server design: tools, resources, prompts for AI assistants (Claude Desktop, Claude Code) |
 | [Testing suites](docs/testing-suites.md) | Test layers, pytest, pipeline test (`test_pipeline.py`), curl integration |
 
 RAG test:
