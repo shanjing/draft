@@ -961,7 +961,7 @@ do_start_ui_flow() {
         kill $_old_pids 2>/dev/null || true
         sleep 1
       fi
-      nohup "$PYTHON" "$SCRIPT_DIR/scripts/serve.py" >> "$_UI_LOG" 2>&1 &
+      DRAFT_OTEL_ENABLED=1 nohup "$PYTHON" "$SCRIPT_DIR/scripts/serve.py" >> "$_UI_LOG" 2>&1 &
       _UI_PID=$!
       ( sleep 2; case "$OS" in Darwin) open "http://localhost:8058" ;; *) xdg-open "http://localhost:8058" 2>/dev/null || true ;; esac ) &
       printf "  ${G}Draft UI started in background${N} (PID %s). Log: %s\n" "$_UI_PID" "$_UI_LOG"
@@ -971,7 +971,7 @@ do_start_ui_flow() {
       printf "${D}Skipped.${N}\n"
       printf "You can start Draft later by running this setup.sh again or by running:\n"
       printf "  source .venv/bin/activate\n"
-      printf "  python scripts/serve.py\n"
+      printf "  DRAFT_OTEL_ENABLED=1 python scripts/serve.py\n"
       echo ""
       ;;
   esac

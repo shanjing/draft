@@ -12,10 +12,8 @@ This repo stores private documents (tech details, drafts) extracted from other r
 
 **Design documents** are in **`docs/`** at the repo root:
 
-- **`docs/storage-and-metadata-design.md`** — Storage layer, vault, **sources.yaml** as source of truth, manifest, file registry, reconnection; includes architecture diagram (Mermaid) and vault improvements.
-- **`docs/intelligence-layer-design.md`** — Intelligence layer (embeddings, RAG, LLM).
-- **`docs/local-oracle-design.md`** — Local oracle / Q&A over docs.
-- **`docs/RAG-design-principles.md`** — RAG design: chunking (.md + .py via ast), ingest from vault and effective roots, Chroma, citations with code snippets, Operations (rebuild index: `scripts/index_for_ai.py --profile quick|deep`).
+- **`docs/engineering.md`** — Combined reference: design principles, storage and path abstraction, metadata layer and vault, add-source pipeline, intelligence layer (search and RAG), local oracle, future and implementation order (basic → core).
+- **`docs/RAG_design.md`** — RAG design: chunking (.md + .py via ast), ingest from vault and effective roots, Chroma, citations with code snippets, Operations (rebuild index: `scripts/index_for_ai.py --profile quick|deep`).
 - **`docs/CLAUDE.md`** — Agent workflow and principles (plan mode, subagents, verification, task management).
 
 ---

@@ -8,6 +8,7 @@ pytest tests/ -v
 - **test_ask.py** — Ask API (**POST /api/ask**, SSE stream), LLM status.
 - **test_search.py** — Search API, tree (includes vault).
 - **test_components.py** — Chunking, ingest (**build_index**), **ai_engine** (**retrieve**, **_env_strip**).
+- **test_otel.py** — OpenTelemetry (OTel): **lib/otel.py** (no-op tracer/meter, `get_tracer`/`get_meter`, `configure_otel`), **lib/metrics.py** (all `record_*` functions), **mcp/instrumentation.py** (`instrument_tool_call`, `request_id_var`), and **ai_engine** (ask_stream with OTel no-op path). All tests run without the opentelemetry-sdk installed. One test builds the RAG index and is marked `slow`; skip with **`pytest tests/test_otel.py -m 'not slow'`** for a fast run.
 - **test_ask_curl.sh** — Manual curl test against a running server; run with **`bash tests/test_ask_curl.sh [BASE_URL]`**.
 
 Integration test against a live server: **`pytest tests/test_integration_curl.py -m integration`** (server must be running on 8058).

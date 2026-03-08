@@ -2,6 +2,7 @@
 The main library for the RAG feature.
 RAG over draft docs: semantic search + LLM (Claude or Ollama).
 Strict "answer only from context" prompting. Returns streamed text + citations.
+Instrumented with OTel metrics and traces (lib/metrics.py, lib/otel.py) when configured.
 
 What makes our RAG system?
 1. Our vector store (ChromaDB for this MVP)
@@ -15,11 +16,19 @@ There are limitations to this MVP RAG system:
 3. too many to mention...
 """
 import os
+import time
 from pathlib import Path
 
 from lib.ingest import COLLECTION_NAME, EMBED_MODEL, TRUST_REMOTE_CODE  # noqa: F401
 from lib.log import get_logger
 from lib.manifest import parse_sources_yaml
+from lib.metrics import (
+    record_llm_duration,
+    record_rag_request,
+    record_rerank,
+    record_retrieval,
+)
+from lib.otel import StatusCode, get_tracer
 from lib.paths import get_effective_repo_root, get_hf_cache_root, get_sources_yaml_path, get_vault_root
 from lib.prompts import SYSTEM_PROMPT
 
@@ -319,7 +328,7 @@ def _build_citations(draft_root: Path, chunks: list[dict]) -> list[dict]:
         citations.append(cit)
     return citations
 
-#the entry point for RAG retrieval and LLM processing
+# Entry point for RAG retrieval and LLM processing. OTel: one parent span (rag.ask), child spans for retrieval, rerank, generation; metrics after each stage.
 def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt: bool = False):
     """
     Retrieve top-k chunks, rerank with cross-encoder to top-n, call LLM, stream response.
@@ -340,101 +349,157 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt
     embed_model_display = _env_strip("DRAFT_EMBED_MODEL") or meta.get("embed_model") or EMBED_MODEL
     embed_model = meta.get("embed_model") or EMBED_MODEL  # retrieval uses index-built model
 
-    chunks = retrieve(draft_root, query, top_k=RETRIEVAL_TOP_K)
-    if debug:
-        log.info(f"embed_model: {embed_model}")
-        log.info(f"cross_encoder_model: {_get_cross_encoder_model()}")
-        log.info(f"retrieval: {len(chunks)} chunks (top_k={RETRIEVAL_TOP_K})")
+    tracer = get_tracer("draft", "1.0.0")
+    with tracer.start_as_current_span("rag.ask") as _root_span:
+        t_ret = time.perf_counter()
+        # OTel child span: retrieval (embed + vector search). Attributes: embed_model, top_k, chunk_count.
+        with tracer.start_as_current_span("rag.retrieval") as ret_span:
+            ret_span.set_attribute("rag.embed_model", embed_model)
+            ret_span.set_attribute("rag.top_k", str(RETRIEVAL_TOP_K))
+            chunks = retrieve(draft_root, query, top_k=RETRIEVAL_TOP_K)
+            ret_span.set_attribute("rag.chunk_count", str(len(chunks)))
+        record_retrieval(time.perf_counter() - t_ret, embed_model, RETRIEVAL_TOP_K, len(chunks))
 
-    chunks = rerank(query, chunks, top_n=RERANK_TOP_N)
-    #log the rerank scores for debugging
-    if debug and chunks:
-        for i, c in enumerate(chunks, 1):
-            score = c.get("score", "?")
-            label = f"{c.get('repo', '')}/{c.get('path', '')}"
-            if c.get("heading"):
-                label += f" — {c.get('heading', '')}"
-            log.info(f"rerank #{i} score={score} {label}")
+        if debug:
+            log.info(f"embed_model: {embed_model}")
+            log.info(f"cross_encoder_model: {_get_cross_encoder_model()}")
+            log.info(f"retrieval: {len(chunks)} chunks (top_k={RETRIEVAL_TOP_K})")
 
-    citations = _build_citations(draft_root, chunks)
+        reranker_model = _get_cross_encoder_model()
+        t_rerank = time.perf_counter()
+        # OTel child span: rerank (cross-encoder). Attributes: reranker_model, chunk_count.
+        with tracer.start_as_current_span("rag.rerank") as rerank_span:
+            rerank_span.set_attribute("rag.reranker_model", reranker_model)
+            rerank_span.set_attribute("rag.chunk_count", str(len(chunks)))
+            chunks = rerank(query, chunks, top_n=RERANK_TOP_N)
+        record_rerank(time.perf_counter() - t_rerank, reranker_model)
 
-    # Compute LLM model for display and which streamer to use
-    _ensure_env_loaded(draft_root)
-    endpoint_base = _get_llm_endpoint_base()
-    provider = _env_strip("DRAFT_LLM_PROVIDER", "").lower()
-    model_override = _env_strip("DRAFT_LLM_MODEL") or None
-    cloud_model = _env_strip("CLOUD_AI_MODEL")
-    local_model = _env_strip("LOCAL_AI_MODEL")
-    if local_model and local_model.startswith("ollama_chat/"):
-        local_model = local_model.replace("ollama_chat/", "", 1)
-    ollama_model = _env_strip("OLLAMA_MODEL") or local_model or "qwen3:8b"
-    if not provider and cloud_model:
-        provider = "gemini"
-    if not provider and (local_model or _env_strip("OLLAMA_MODEL")):
-        provider = "ollama"
-    if not provider:
-        provider = "ollama"
-    if endpoint_base:
-        llm_model = model_override or _env_strip("OLLAMA_MODEL") or (
-            "gpt-4o-mini" if _env_strip("DRAFT_LLM_API_KEY") else ollama_model
-        )
-    elif provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
-        llm_model = model_override or "claude-3-5-sonnet-20241022"
-    elif provider == "gemini":
-        llm_model = (model_override or cloud_model or "gemini-2.5-flash").strip()
-    elif provider == "openai":
-        llm_model = model_override or "gpt-4o-mini"
-    else:
-        llm_model = ollama_model
+        # Log the rerank scores for debugging
+        if debug and chunks:
+            for i, c in enumerate(chunks, 1):
+                score = c.get("score", "?")
+                label = f"{c.get('repo', '')}/{c.get('path', '')}"
+                if c.get("heading"):
+                    label += f" — {c.get('heading', '')}"
+                log.info(f"rerank #{i} score={score} {label}")
 
-    # Emit model info after retrieval+rerank, before streaming (display from .env/config)
-    yield ("models", {
-        "embed_model": embed_model_display,
-        "cross_encoder_model": _get_cross_encoder_model(),
-        "llm_model": llm_model,
-    })
+        citations = _build_citations(draft_root, chunks)
 
-    if not chunks:
-        yield ("error", "No indexed documents. Run 'python scripts/index_for_ai.py' to build the AI index.")
-        return
-
-    context = _build_context(chunks)
-    user_content = f"Context from documentation:\n\n{context}\n\n---\n\nQuestion: {query}"
-
-    if show_prompt:
-        yield ("prompt", {"system": SYSTEM_PROMPT, "user": user_content})
-
-    # Unified endpoint: one URL for Ollama or OpenAI-compatible (K8s / public LLM)
-    if endpoint_base:
-        api_key = _env_strip("DRAFT_LLM_API_KEY", "")
-        if api_key:
-            yield from _stream_openai_compatible(endpoint_base, api_key, llm_model, user_content)
+        # Compute LLM model for display and which streamer to use
+        _ensure_env_loaded(draft_root)
+        endpoint_base = _get_llm_endpoint_base()
+        provider = _env_strip("DRAFT_LLM_PROVIDER", "").lower()
+        model_override = _env_strip("DRAFT_LLM_MODEL") or None
+        cloud_model = _env_strip("CLOUD_AI_MODEL")
+        local_model = _env_strip("LOCAL_AI_MODEL")
+        if local_model and local_model.startswith("ollama_chat/"):
+            local_model = local_model.replace("ollama_chat/", "", 1)
+        ollama_model = _env_strip("OLLAMA_MODEL") or local_model or "qwen3:8b"
+        if not provider and cloud_model:
+            provider = "gemini"
+        if not provider and (local_model or _env_strip("OLLAMA_MODEL")):
+            provider = "ollama"
+        if not provider:
+            provider = "ollama"
+        if endpoint_base:
+            llm_model = model_override or _env_strip("OLLAMA_MODEL") or (
+                "gpt-4o-mini" if _env_strip("DRAFT_LLM_API_KEY") else ollama_model
+            )
+        elif provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
+            llm_model = model_override or "claude-3-5-sonnet-20241022"
+        elif provider == "gemini":
+            llm_model = (model_override or cloud_model or "gemini-2.5-flash").strip()
+        elif provider == "openai":
+            llm_model = model_override or "gpt-4o-mini"
         else:
-            yield from _stream_ollama(user_content, llm_model, base_url=endpoint_base)
-    elif provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
-        api_key = _env_strip("ANTHROPIC_API_KEY")
-        if api_key:
-            yield from _stream_claude(user_content, api_key, model_override)
-        else:
-            yield from _stream_ollama(user_content, ollama_model)
-    elif provider == "gemini":
-        api_key = _env_strip("GEMINI_API_KEY") or _env_strip("GOOGLE_API_KEY")
-        if api_key:
-            yield from _stream_gemini(user_content, api_key, (model_override or cloud_model).strip() or None)
-        else:
-            yield ("error", "GEMINI_API_KEY or GOOGLE_API_KEY not set. Run setup.sh to configure.")
-    elif provider == "openai":
-        api_key = _env_strip("OPENAI_API_KEY")
-        if api_key:
-            yield from _stream_openai(user_content, api_key, model_override)
-        else:
-            yield ("error", "OPENAI_API_KEY not set. Run setup.sh to configure.")
-    elif provider == "ollama" or not provider:
-        yield from _stream_ollama(user_content, ollama_model)
-    else:
-        yield ("error", f"Unknown DRAFT_LLM_PROVIDER={provider}. Use ollama, claude, gemini, or openai.")
+            llm_model = ollama_model
 
-    yield ("citations", citations)
+        # Emit model info after retrieval+rerank, before streaming (display from .env/config)
+        yield ("models", {
+            "embed_model": embed_model_display,
+            "cross_encoder_model": _get_cross_encoder_model(),
+            "llm_model": llm_model,
+        })
+
+        if not chunks:
+            record_rag_request("error", "NoChunks")
+            yield ("error", "No indexed documents. Run 'python scripts/index_for_ai.py' to build the AI index.")
+            return
+
+        context = _build_context(chunks)
+        user_content = f"Context from documentation:\n\n{context}\n\n---\n\nQuestion: {query}"
+
+        if show_prompt:
+            yield ("prompt", {"system": SYSTEM_PROMPT, "user": user_content})
+
+        # Build the stream generator for the chosen provider
+        if endpoint_base:
+            api_key = _env_strip("DRAFT_LLM_API_KEY", "")
+            if api_key:
+                stream_gen = _stream_openai_compatible(endpoint_base, api_key, llm_model, user_content)
+            else:
+                stream_gen = _stream_ollama(user_content, llm_model, base_url=endpoint_base)
+            llm_system = "openai"
+        elif provider == "claude" or (not provider and _env_strip("ANTHROPIC_API_KEY")):
+            api_key = _env_strip("ANTHROPIC_API_KEY")
+            if api_key:
+                stream_gen = _stream_claude(user_content, api_key, model_override)
+            else:
+                stream_gen = _stream_ollama(user_content, ollama_model)
+            llm_system = "claude"
+        elif provider == "gemini":
+            api_key = _env_strip("GEMINI_API_KEY") or _env_strip("GOOGLE_API_KEY")
+            if api_key:
+                stream_gen = _stream_gemini(user_content, api_key, (model_override or cloud_model).strip() or None)
+            else:
+                record_rag_request("error", "ConfigError")
+                yield ("error", "GEMINI_API_KEY or GOOGLE_API_KEY not set. Run setup.sh to configure.")
+                return
+            llm_system = "gemini"
+        elif provider == "openai":
+            api_key = _env_strip("OPENAI_API_KEY")
+            if api_key:
+                stream_gen = _stream_openai(user_content, api_key, model_override)
+            else:
+                record_rag_request("error", "ConfigError")
+                yield ("error", "OPENAI_API_KEY not set. Run setup.sh to configure.")
+                return
+            llm_system = "openai"
+        elif provider == "ollama" or not provider:
+            stream_gen = _stream_ollama(user_content, ollama_model)
+            llm_system = "ollama"
+        else:
+            record_rag_request("error", "ConfigError")
+            yield ("error", f"Unknown DRAFT_LLM_PROVIDER={provider}. Use ollama, claude, gemini, or openai.")
+            return
+
+        # OTel child span: LLM call (GenAI attributes). In finally: record LLM duration metric and set gen_ai.response.model.
+        with tracer.start_as_current_span("rag.generation") as gen_span:
+            gen_span.set_attribute("gen_ai.system", llm_system)
+            gen_span.set_attribute("gen_ai.request.model", llm_model)
+            t_llm = time.perf_counter()
+            had_error = False
+            try:
+                for event in stream_gen:
+                    if event[0] == "error":
+                        record_rag_request("error", "LLMError")
+                        had_error = True
+                        gen_span.record_exception(Exception(event[1]))
+                        gen_span.set_status(StatusCode.ERROR, str(event[1])[:200])
+                        yield event
+                        break
+                    yield event
+            except GeneratorExit:
+                gen_span.set_status(StatusCode.ERROR, "client_disconnected")
+                raise
+            finally:
+                # Always record LLM duration (GenAI semconv, seconds) and set response model on span.
+                record_llm_duration(time.perf_counter() - t_llm, llm_system, llm_model)
+                gen_span.set_attribute("gen_ai.response.model", llm_model)
+            if not had_error:
+                record_rag_request("ok")
+
+        yield ("citations", citations)
 
 
 def _stream_claude(user_content: str, api_key: str, model_override: str | None = None):

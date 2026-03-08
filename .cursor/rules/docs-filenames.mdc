@@ -1,0 +1,12 @@
+---
+description: Doc filename convention — underscores between words, lowercase except abbreviations (RAG, MCP)
+alwaysApply: false
+---
+
+# Doc filenames (docs/)
+
+- **Separator:** Use **underscore** (`_`) between words in filenames. Do not use hyphens.
+- **Case:** All **lowercase** except **abbreviations**, which stay uppercase (e.g. **RAG**, **MCP**).
+- **Examples:** `engineering.md`, `RAG_design.md`, `MCP_design.md`, `observability_design.md`, `changelog_feat_enhance_RAG.md`, `agentic_RAG_design.md`.
+
+When creating or renaming files in `docs/`, follow this convention and update any references (README, CLAUDE.md, other docs) to use the new name.

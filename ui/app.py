@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Disable Chroma telemetry before any chromadb import (avoids "capture() takes 1 positional argument" error)
@@ -247,13 +248,26 @@ def get_tree() -> list:
     return result
 
 
-app = FastAPI(title="Draft", description="Browse draft documents")
-
-
-@app.on_event("startup")
-def _startup():
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
     ensure_sources_yaml(DRAFT_ROOT)
     ensure_vault_ready()
+    # OTel: initialize by default so metrics/spans are collected; service name from env or draft-ui.
+    try:
+        from lib.otel import configure_otel
+        configure_otel(service_name=os.environ.get("OTEL_SERVICE_NAME") or "draft-ui")
+    except Exception:
+        pass
+    yield
+    # Flush and shutdown so the final metric batch is exported (otherwise dropped on exit).
+    try:
+        from lib.otel import shutdown_otel
+        shutdown_otel()
+    except Exception:
+        pass
+
+
+app = FastAPI(title="Draft", description="Browse draft documents", lifespan=_lifespan)
 
 
 try:

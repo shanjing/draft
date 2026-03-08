@@ -1,6 +1,6 @@
 # RAG Operations
 
-How to change embed/encoder models and how to run RAG + LLM tests. See **RAG-design-principles.md** for architecture and model-performance guidance.
+How to change embed/encoder models and how to run RAG + LLM tests. See **RAG_design.md** for architecture and model-performance guidance.
 
 ---
 
@@ -10,7 +10,7 @@ How to change embed/encoder models and how to run RAG + LLM tests. See **RAG-des
 - **Via setup:** Run `./setup.sh`. Use **option 2** (Setup embedding model) and **option 3** (Setup encoder model) to choose or type Hugging Face model names; option 2 also lists local Ollama embedding models. When the embed model changes, setup reminds you to rebuild the index (option 5).
 - **Rebuild required:** After changing the embed model, run **option 5** (Build RAG/index) so the vector index matches the new model. The **Actions** section in setup shows `[required]` when the current Embed in `.env` does not match the RAG index.
 - **Defaults:** Embed `sentence-transformers/all-MiniLM-L6-v2`; encoder `cross-encoder/ms-marco-MiniLM-L-6-v2`. For strict offline use, set `HF_HUB_OFFLINE=1` in `.env`.
-- **16GB laptop (no GPU):** Use `nomic-ai/nomic-embed-text-v1.5` + `BAAI/bge-reranker-v2-m3` (see RAG-design-principles.md).
+- **16GB laptop (no GPU):** Use `nomic-ai/nomic-embed-text-v1.5` + `BAAI/bge-reranker-v2-m3` (see RAG_design.md).
 
 ---
 
@@ -57,4 +57,4 @@ The RAG vector index (ChromaDB) lives under **`DRAFT_HOME/.vector_store/`** (e.g
 
 ## d. Operations in containers (Docker / Kubernetes)
 
-RAG operations work the same way when Draft runs in containers: embed and encoder models are read from **environment configuration** (mounted `.env` or ConfigMap/Secret). The app **re-reads** config on each reindex and on each Ask for the LLM; changing `DRAFT_EMBED_MODEL` or `DRAFT_CROSS_ENCODER_MODEL` does **not** require a container or pod restart—run a reindex (e.g. from the UI or by running the index script in the container) after changing the embed model so the vector index matches. Data lives under a single root (`DRAFT_HOME`) that you mount as a volume—including the vector store at `DRAFT_HOME/.vector_store`; the same image can target local Ollama, in-cluster LLMs, or cloud APIs by changing env. **Disk:** Ensure ~4 GB free for DRAFT_HOME (includes HF cache at `.cache/huggingface`; see [Container orchestration guide](container-orchestration-guide.md#disk-space)). For full setup (build, run, mounts, K8s manifests), see **[Container orchestration guide](container-orchestration-guide.md)**.
+RAG operations work the same way when Draft runs in containers: embed and encoder models are read from **environment configuration** (mounted `.env` or ConfigMap/Secret). The app **re-reads** config on each reindex and on each Ask for the LLM; changing `DRAFT_EMBED_MODEL` or `DRAFT_CROSS_ENCODER_MODEL` does **not** require a container or pod restart—run a reindex (e.g. from the UI or by running the index script in the container) after changing the embed model so the vector index matches. Data lives under a single root (`DRAFT_HOME`) that you mount as a volume—including the vector store at `DRAFT_HOME/.vector_store`; the same image can target local Ollama, in-cluster LLMs, or cloud APIs by changing env. **Disk:** Ensure ~4 GB free for DRAFT_HOME (includes HF cache at `.cache/huggingface`; see [Container orchestration guide](container_orchestration_guide.md#disk-space)). For full setup (build, run, mounts, K8s manifests), see **[Container orchestration guide](container_orchestration_guide.md)**.
