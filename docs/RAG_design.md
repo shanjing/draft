@@ -133,6 +133,10 @@ Citations are built **at query time** in **lib/ai_engine** (e.g. `_build_citatio
 - **Citations**: Each citation is rendered as a link (e.g. `repo/path` or `repo/path (lines X–Y)` for code) that opens the **doc viewer**. For citations with **snippet**, a `<pre>` block below the link shows the code snippet.
 - **Doc viewer**: Serves both `.md` and `.py` (and other allowed types). So “View source” for a code citation opens the actual file (e.g. `.py`) in the same viewer. Optional future: fragment or query param to scroll to a line.
 
+### 8. Observability (summary)
+
+The RAG pipeline is instrumented with **OpenTelemetry (OTel)** so pipeline-level questions — *"Where did this request go wrong and why?"* — can be answered. When OTel is enabled, each RAG call (from UI, MCP, or CLI) produces a parent span and child spans for **retrieval**, **reranking**, and **LLM generation**. That gives latency breakdown and error attribution (e.g. retrieval slow vs LLM timeout). Infrastructure (Prometheus/Grafana) answers *"Is the system healthy?"*; structured logs answer *"What exactly happened?"* Full design, principles, and application of OTel for RAG and MCP: **[observability_design.md](observability_design.md)** (source of truth).
+
 ---
 
 ## Ingestion pipeline (scripts/index_for_ai.py + lib/ingest)

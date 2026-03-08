@@ -1,7 +1,5 @@
 # Draft
 
-
-
 Draft is a personal documentation hub. It pulls document files from your other repos and GitHub projects into one browsable place. You get a unified view of scattered docs — engineering notes, design specs, drafts — with full-text search and a local RAG + LLM that answers questions from your content.
 
 Draft works with or without an LLM — Ollama for fully offline use. RAG embed/encoder/reranker models are downloaded from huggingface and run 100% locally.
@@ -61,17 +59,17 @@ docker run -p 8058:8058 \
 
 Replace `/path/to/draft/repo` with your Draft repo path (e.g. the directory that contains `draft.sh`). Without `OLLAMA_HOST`, the app uses `localhost:11434` (the container’s own loopback), so Ollama on the host won’t be reachable.
 
-**Easiest:** run `**./setup.sh`** and choose **8) Run Draft in a Docker container** — it detects local vs cloud LLM, creates `.env.docker` when using Ollama, stops any running container, then starts a new one. Full details: [docs/container-orchestration-guide.md](docs/container-orchestration-guide.md).
+**Easiest:** run `**./setup.sh`** and choose **8) Run Draft in a Docker container** — it detects local vs cloud LLM, creates `.env.docker` when using Ollama, stops any running container, then starts a new one. Full details: [docs/container_orchestration_guide.md](docs/container_orchestration_guide.md).
 
 ## Where documents are stored (`~/.draft`)
 
-Document data and config live under `**~/.draft/`** (or `**DRAFT_HOME**` if set): `**sources.yaml**` (source list), `**.doc_sources/**` (one subdir per pulled repo), and `**vault/**` (curated docs). The repo holds only code. Set `**DRAFT_HOME**` to use a different data root (default `**~/.draft**`).
+Document data and config live under `**~/.draft/`** (or `**DRAFT_HOME`** if set): `**sources.yaml**` (source list), `**.doc_sources/**` (one subdir per pulled repo), and `**vault/**` (curated docs). The repo holds only code. Set `**DRAFT_HOME**` to use a different data root (default `**~/.draft**`).
 
 ## sources.yaml (your config)
 
 `**sources.yaml**` is your personal list of doc sources. It lives at `**~/.draft/sources.yaml**` (or `**$DRAFT_HOME/sources.yaml**`).
 
-- **First time:** Run `**./setup.sh`** or start the app; they create `**~/.draft/sources.yaml**` from the repo’s `**sources.example.yaml**` if missing.
+- **First time:** Run `**./setup.sh`** or start the app; they create `**~/.draft/sources.yaml`** from the repo’s `**sources.example.yaml**` if missing.
 - Each entry is a name and a `source`:
   - **Local path** — e.g. `../my_notes` or `/path/to/repo`.
   - **GitHub URL** — e.g. `https://github.com/owner/repo`. Pull fetches `.md` files via the GitHub API (no clone).
@@ -91,21 +89,31 @@ python scripts/pull.py -a https://github.com/owner/repo
 
 The **Ask (AI)** panel (top of the content area) answers questions using only your indexed docs (RAG). To use it you need a local LLM (Ollama) or an API key from a cloud provider. `**./setup.sh`** lets you choose the model and enter the API key.
 
-No LLM is needed for the rest of Draft — tree, search, pull, add source. See `**docs/local-oracle-design.md**` for details.
+No LLM is needed for the rest of Draft — tree, search, pull, add source. See [Engineering](docs/engineering.md) for details.
+
+## Observability
+
+Draft uses **OpenTelemetry (OTel)** for metrics and traces when the optional SDK is installed. RAG (retrieve → rerank → generate) and MCP tool calls are instrumented; entry points call `configure_otel()` at startup by default and `shutdown_otel()` on exit so the final metric batch is exported.
+
+- **Metrics:** RAG request counts, retrieval/rerank/LLM latency (GenAI semconv where applicable), MCP tool calls. Default output: `**~/.draft/otel_metrics.log`** (or `$DRAFT_HOME/otel_metrics.log`). Set `**DRAFT_OTEL_METRICS_LOG=stdout**` to print to the terminal, or `**OTEL_EXPORTER_OTLP_ENDPOINT**` to send to an OTLP backend (Grafana, Honeycomb, Jaeger, etc.).
+- **Traces:** Spans for `rag.ask`, `rag.retrieval`, `rag.rerank`, `rag.generation`, and `mcp.tool`; exported to console or OTLP.
+- **Optional:** Install with `pip install -r requirements-otel.txt`. Without the SDK, all instrumentation is no-op and Draft runs unchanged.
+
+See [Observability design](docs/observability_design.md) for the full spec and [OTel walkthrough](docs/OTel_walkthrough.md) for a data-flow walkthrough and live demo.
 
 ## Vault
 
-The **vault** lives at `**~/.draft/vault/`** (or `**$DRAFT_HOME/vault/**`). It is separate from `**.doc_sources/**` so it can later be pointed at encrypted S3, iCloud, etc. File encryption is TODO.
+The **vault** lives at `**~/.draft/vault/`** (or `**$DRAFT_HOME/vault/`**). It is separate from `**.doc_sources/**` so it can later be pointed at encrypted S3, iCloud, etc. File encryption is TODO.
 
 ## Privacy
 
 Draft is built so you can run **everything locally** and keep your docs and queries off the network when you want.
 
-- **Hugging Face offline:** Draft sets `**HF_HUB_OFFLINE=1`** in `**.env**` (and uses it by default in code). Hugging Face models (embeddings, cross-encoder) then use only already-downloaded or local assets — no outbound calls to Hugging Face Hub. Setup and the app ensure this is set so RAG stays local.
+- **Hugging Face offline:** Draft sets `**HF_HUB_OFFLINE=1`** in `**.env`** (and uses it by default in code). Hugging Face models (embeddings, cross-encoder) then use only already-downloaded or local assets — no outbound calls to Hugging Face Hub. Setup and the app ensure this is set so RAG stays local.
 - **Local LLM:** When resources allow, use **Ollama** with a local model. `**./setup.sh`** can configure an all-local stack (embed + cross-encoder rerank + chat via Ollama). No doc content or queries are sent to the internet.
 - **Optional cloud:** You can still choose a cloud LLM (Claude, Gemini, OpenAI) in setup; only then are prompts and answers sent to the provider you configured.
 
-For maximum privacy, use **Ollama** and keep `**HF_HUB_OFFLINE=1`** in `**.env**` so indexing and Ask (AI) run fully on your machine.
+For maximum privacy, use **Ollama** and keep `**HF_HUB_OFFLINE=1`** in `**.env`** so indexing and Ask (AI) run fully on your machine.
 
 ## Using setup.sh
 
@@ -120,9 +128,9 @@ For maximum privacy, use **Ollama** and keep `**HF_HUB_OFFLINE=1`** in `**.env**
 7. **Build RAG index** (option 5) — after setup, runs the AI index build (quick or deep profile) so Ask (AI) works immediately.
 8. **Test RAG + LLM** (option 6) — runs a sample Ask with the configured models to verify the pipeline.
 9. **Start UI** (option 7, default) — starts the Draft UI on the local host.
-10. **Run in Docker** (option 8) — runs the `draft-ui` container with your data and LLM config; detects local vs cloud LLM, stops any existing container, then starts a new one. See [docs/container-orchestration-guide.md](docs/container-orchestration-guide.md).
+10. **Run in Docker** (option 8) — runs the `draft-ui` container with your data and LLM config; detects local vs cloud LLM, stops any existing container, then starts a new one. See [docs/container_orchestration_guide.md](docs/container_orchestration_guide.md).
 
-You can re-run `**./setup.sh`** anytime to add more sources or change the LLM. To tweak config by hand, edit `**.env**` (embed model, cross-encoder, LLM provider, API keys). See `**docs/RAG_operations.md**` for how to change models and run RAG tests (setup option 6, ask.py, pipeline test, CI/CD).
+You can re-run `**./setup.sh`** anytime to add more sources or change the LLM. To tweak config by hand, edit `**.env`** (embed model, cross-encoder, LLM provider, API keys). See `**docs/RAG_operations.md**` for how to change models and run RAG tests (setup option 6, ask.py, pipeline test, CI/CD).
 
 ---
 
@@ -131,24 +139,18 @@ You can re-run `**./setup.sh`** anytime to add more sources or change the LLM. T
 The `**docs/**` folder contains design and operations docs you can use as reference:
 
 
-| Doc                                                              | Purpose                                                                                                                     |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| [Storage & metadata design](docs/storage-and-metadata-design.md) | Access layer, vault, `sources.yaml`, manifest, reconnection                                                                 |
-| [Core implementations](docs/core-implementations.md)             | Source type taxonomy, storage layout under `DRAFT_HOME`, manifest                                                           |
-| [Design principles](docs/design-principles.md)                   | Data sources and operations (github, local_dir, local_git, vault, etc.)                                                     |
-| [Intelligence layer design](docs/intelligence-layer-design.md)   | Embeddings, Chroma, LLM integration, RAG pipeline                                                                           |
-| [RAG design principles](docs/RAG-design-principles.md)           | RAG goals, architecture, chunking, citations, two-stage retrieval (bi-encoder + cross-encoder), model performance & privacy |
-| [RAG operations](docs/RAG_operations.md)                         | How to change embed/encoder models; how to run tests (setup option 6, ask.py, test_pipeline, CI/CD)                         |
-| [Container orchestration](docs/container-orchestration-guide.md) | Docker and Kubernetes deployment, unified LLM endpoint, example manifests in `deployment/`                                  |
-| [Local oracle design](docs/local-oracle-design.md)               | When and how a local LLM is used for Ask (AI)                                                                               |
-| [MCP design](docs/MCP_design.md)                                 | MCP server design: tools, resources, prompts for AI assistants (Claude Desktop, Claude Code)                                |
-| [Testing suites](docs/testing-suites.md)                         | Test layers, pytest, pipeline test (`test_pipeline.py`), curl integration                                                   |
+| Doc                                                              | Purpose                                                                                                                       |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| [Engineering](docs/engineering.md)                               | reference: design principles, storage, metadata, vault, intelligence layer, local oracle, implementation order (basic → core) |
+| [RAG design](docs/RAG_design.md)                                 | RAG goals, architecture, chunking, citations, two-stage retrieval (bi-encoder + cross-encoder), model performance & privacy   |
+| [RAG operations](docs/RAG_operations.md)                         | How to change embed/encoder models; how to run tests (setup option 6, ask.py, test_pipeline, CI/CD)                           |
+| [Container orchestration](docs/container_orchestration_guide.md) | Docker and Kubernetes deployment, unified LLM endpoint, example manifests in `deployment/`                                    |
+| [MCP design](docs/MCP_design.md)                                 | MCP server design: tools, resources, prompts for AI assistants (Claude Desktop, Claude Code)                                  |
+| [Observability design](docs/observability_design.md)             | OTel metrics and traces (RAG + MCP), GenAI semconv, console vs OTLP, `lib/otel.py` and `lib/metrics.py`, SLIs                 |
+| [OTel walkthrough](docs/OTel_walkthrough.md)                     | Data-flow walkthrough (resource → console), live demo, metrics log file and env vars                                          |
+| [Testing suites](docs/testing_suites.md)                         | Test layers, pytest, pipeline test (`test_pipeline.py`), OTel tests, curl integration                                         |
 
 
 RAG test:
 
-
-
 UI:
-
-

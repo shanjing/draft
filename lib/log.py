@@ -41,3 +41,38 @@ def configure_cli(level: int = logging.INFO) -> None:
     for clean subprocess output (e.g. index_for_ai -v shown in system console).
     """
     configure(level=level, format="%(message)s")
+
+
+_JSON_EXTRA_KEYS = {"request_id", "tool", "transport", "duration_ms", "status", "error_type"}
+
+
+class _JsonFormatter(logging.Formatter):
+    """Format LogRecord as a single JSON line. Includes message, levelname, ts, and extra keys."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        import json
+        out = {
+            "ts": record.created,
+            "levelname": record.levelname,
+            "message": record.getMessage(),
+        }
+        for key in _JSON_EXTRA_KEYS:
+            if hasattr(record, key):
+                out[key] = getattr(record, key)
+        return json.dumps(out) + "\n"
+
+
+def configure_json(level: int = logging.INFO) -> None:
+    """
+    Configure logging to emit one JSON object per record (for MCP and other machine-readable logs).
+    Uses a minimal JSON formatter: message, levelname, and a fixed set of extra keys
+    (request_id, tool, transport, duration_ms, status, error_type).
+    Call when --log-json or MCP_LOG_JSON=1.
+    """
+    root = logging.getLogger()
+    for h in root.handlers[:]:
+        root.removeHandler(h)
+    handler = logging.StreamHandler()
+    handler.setFormatter(_JsonFormatter())
+    root.addHandler(handler)
+    root.setLevel(level)
