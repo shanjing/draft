@@ -8,6 +8,8 @@ import os
 import sys
 from pathlib import Path
 
+import click
+
 # Draft repo root
 SCRIPT_DIR = Path(__file__).resolve().parent
 DRAFT_ROOT = SCRIPT_DIR.parent
@@ -20,17 +22,30 @@ try:
 except ImportError:
     pass
 
+DEFAULT_PORT = 8059
 
-def main() -> None:
-    import argparse
-    p = argparse.ArgumentParser(description="Draft MCP server")
-    p.add_argument("--stdio", action="store_true", help="Use stdio transport")
-    p.add_argument("--log-json", action="store_true", help="Emit JSON log lines (or set MCP_LOG_JSON=1)")
-    args = p.parse_args()
 
-    if args.log_json or os.environ.get("MCP_LOG_JSON"):
+@click.command(help="Draft MCP server: stdio (Claude Desktop) or Streamable HTTP.")
+@click.option("--stdio", is_flag=True, help="Use stdio transport (no auth).")
+@click.option("--log-json", is_flag=True, help="Emit JSON log lines (or set MCP_LOG_JSON=1).")
+@click.option("-p", "--port", type=int, default=DEFAULT_PORT, help=f"HTTP port when not --stdio (default: {DEFAULT_PORT}).")
+def main(stdio: bool, log_json: bool, port: int) -> None:
+    use_json_log = log_json or os.environ.get("MCP_LOG_JSON")
+    if use_json_log:
         from lib.log import configure_json
         configure_json()
+
+    # File log: always write to ~/.draft/draft-mcp.log in addition to stderr.
+    import logging
+    from lib.log import _JsonFormatter
+    from lib.paths import get_draft_home
+    _log_path = get_draft_home() / "draft-mcp.log"
+    _fh = logging.FileHandler(_log_path)
+    _fh.setFormatter(
+        _JsonFormatter() if use_json_log
+        else logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+    )
+    logging.getLogger().addHandler(_fh)
 
     # OTel: initialize by default; shutdown_otel at exit so final metric batch is exported.
     try:
@@ -40,20 +55,12 @@ def main() -> None:
     except Exception:
         pass
 
-    # MCP server implementation not yet present; observability is wired for when it is.
-    try:
-        from mcp import server  # noqa: F401
-    except ImportError:
-        sys.stderr.write("MCP server (mcp.server) not implemented yet. Observability (OTel, JSON logs) is configured.\n")
-        sys.exit(0)
-
-    # When mcp.server exists, run it with args.stdio
-    if args.stdio:
-        from mcp.server import run_stdio
+    if stdio:
+        from draft_mcp.server import run_stdio
         run_stdio()
     else:
-        from mcp.server import run_http
-        run_http()
+        from draft_mcp.server import run_http
+        run_http(port=port)
 
 
 if __name__ == "__main__":

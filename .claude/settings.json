@@ -1,5 +1,13 @@
 {
   "enabledPlugins": {
     "pyright-lsp@claude-plugins-official": true
+  },
+  "projectConventions": {
+    "scriptsCli": "Use Click for CLI parsing in scripts (e.g. serve_mcp.py, serve.py, pull.py, ask.py). No argparse for new or updated script entrypoints."
+  },
+  "permissions": {
+    "allow": [
+      "Bash(sh 1)"
+    ]
   }
 }
