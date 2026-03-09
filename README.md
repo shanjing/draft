@@ -10,7 +10,8 @@ Draft serves three main use cases: **(1)** personal knowledge base, **(2)** busi
 
 Use Draft as your personal doc hub: one place to browse, search, and ask questions over your notes and pulled repos.
 
-![Draft UI — personal knowledge base](assets/Draft_UserUI-ebcb760b-a241-4aac-b654-91ffd2de84fe.png)
+<img width="1501" height="946" alt="Draft_UserUI" src="https://github.com/user-attachments/assets/3c053376-8925-4980-9c87-b05a018ac166" />
+
 
 ### Get started (quickest way)
 
@@ -80,7 +81,8 @@ For maximum privacy, use **Ollama** and keep **HF_HUB_OFFLINE=1** in **.env**.
 
 Use Draft as a team or company knowledge base: run it in Docker (or Kubernetes), expose full-text and semantic search, and optionally lock down sensitive content in the vault.
 
-![Draft — business / team deployment](assets/Draft_BusinessUser-8a3eeb89-4329-4449-b690-0528a495f36a.png)
+<img width="1503" height="942" alt="Draft_BusinessUser" src="https://github.com/user-attachments/assets/094320c2-28a3-4aef-8769-04ef4da1f6e3" />
+
 
 ### Run Draft in Docker
 
@@ -124,11 +126,13 @@ Use Draft as an **MCP server** for AI agents, SRE runbooks, and ops tooling: exp
 
 **MCP client (e.g. SRE subagent) sends a query** — session + `retrieve_chunks` with a natural-language question (e.g. investigating pod resource constraints):
 
-![MCP client query — retrieve_chunks](assets/MCP_Question-6ad1aac3-4b57-49ee-8023-c2f357cd8209.png)
+<img width="1692" height="635" alt="MCP_Question" src="https://github.com/user-attachments/assets/9449a439-5162-4413-a069-0ad1e2c999df" />
+
 
 **Draft MCP returns ranked chunks** — runbook excerpts with repo, path, heading, text, and score (e.g. inference runbook for memory/CPU checks):
 
-![MCP response — runbook chunks](assets/MCP_Answer-b2467477-f124-492b-b944-65d1a9cbe1d2.png)
+<img width="1698" height="315" alt="MCP_Answer" src="https://github.com/user-attachments/assets/6cf958d5-2aad-471f-a0fe-08417d08db21" />
+
 
 ### MCP server
 
