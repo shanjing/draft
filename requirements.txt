@@ -19,6 +19,9 @@ sentence-transformers>=4.37.0
 transformers>=4.51.0
 tokenizers>=0.13.2
 
+# MCP server
+mcp>=1.0
+
 # AI
 anthropic>=0.18.0
 openai>=1.0.0
