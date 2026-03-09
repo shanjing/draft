@@ -241,24 +241,63 @@ python scripts/serve_mcp.py 2>&1 | head -5
 echo "DRAFT_MCP_TOKEN=your-token-here" >> .env
 ```
 
-**Step 3: Make tool calls**
+**Step 3: Initialize a session**
 
-All calls go to `POST http://localhost:8059/mcp` with `Content-Type: application/json` and `Authorization: Bearer <token>`.
+The Streamable HTTP transport requires an `initialize` handshake. The server returns an `Mcp-Session-Id` header that must be included in all subsequent requests.
+
+```bash
+TOKEN=$(grep DRAFT_MCP_TOKEN .env | cut -d= -f2)
+BASE="http://localhost:8059/mcp"
+HEADERS=(-H "Authorization: Bearer $TOKEN" \
+         -H "Content-Type: application/json" \
+         -H "Accept: application/json, text/event-stream")
+
+SESSION=$(curl -si -X POST "$BASE" "${HEADERS[@]}" \
+  -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' \
+  | grep -i "mcp-session-id" | awk '{print $2}' | tr -d '\r')
+
+echo "Session: $SESSION"
+```
+
+**Step 4: Make tool calls**
+
+All tool calls go to `POST http://localhost:8059/mcp` with the session ID header. Responses are Server-Sent Events (SSE); pipe through `grep '^data:' | cut -c7-` to extract the JSON payload.
 
 ---
 
 ## Testing
+
+### Full Test Suite
+A full test suite is in `tests/test_mcp.py`.
+```bash
+source .venv/bin/activate
+pytest tests/test_mcp.py -v
+```
+
+### Quick Individual Tests Setup (run once per shell session)
+
+```bash
+TOKEN=$(grep DRAFT_MCP_TOKEN .env | cut -d= -f2)
+BASE="http://localhost:8059/mcp"
+HEADERS=(-H "Authorization: Bearer $TOKEN" \
+         -H "Content-Type: application/json" \
+         -H "Accept: application/json, text/event-stream")
+
+SESSION=$(curl -si -X POST "$BASE" "${HEADERS[@]}" \
+  -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' \
+  | grep -i "mcp-session-id" | awk '{print $2}' | tr -d '\r')
+
+echo "Session: $SESSION"
+```
+
+---
 
 ### Test 1 — List available sources
 
 Verifies the server is running, auth works, and `sources.yaml` is read correctly.
 
 ```bash
-TOKEN=$(grep DRAFT_MCP_TOKEN .env | cut -d= -f2)
-
-curl -s -X POST http://localhost:8059/mcp \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+curl -s -X POST "$BASE" "${HEADERS[@]}" -H "Mcp-Session-Id: $SESSION" \
   -d '{
     "jsonrpc": "2.0",
     "id": 1,
@@ -267,10 +306,10 @@ curl -s -X POST http://localhost:8059/mcp \
       "name": "list_sources",
       "arguments": {}
     }
-  }' | python3 -m json.tool
+  }' | grep '^data:' | cut -c7- | python3 -m json.tool
 ```
 
-If the server returns 500 (e.g. "Internal Server Error"), the response is not JSON and `json.tool` will fail with "Expecting value". Restart the MCP server after code changes; ensure `DRAFT_HOME` (or default `~/.draft`) has `sources.yaml`.
+If `SESSION` is empty, the `initialize` call failed — check the token and that the server is running. If the server returns 500, restart the MCP server after code changes; ensure `DRAFT_HOME` (or default `~/.draft`) has `sources.yaml`.
 
 **Expected response:**
 ```json
@@ -298,9 +337,7 @@ The `text` field contains a JSON-encoded list of repo objects. If `doc_count` is
 Verifies the vector index is built and `retrieve_chunks` returns ranked results.
 
 ```bash
-curl -s -X POST http://localhost:8059/mcp \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+curl -s -X POST "$BASE" "${HEADERS[@]}" -H "Mcp-Session-Id: $SESSION" \
   -d '{
     "jsonrpc": "2.0",
     "id": 2,
@@ -313,7 +350,7 @@ curl -s -X POST http://localhost:8059/mcp \
         "rerank": true
       }
     }
-  }' | python -m json.tool
+  }' | grep '^data:' | cut -c7- | python3 -m json.tool
 ```
 
 **Expected response** (abbreviated):
@@ -349,6 +386,7 @@ Confirms the middleware is active.
 curl -s -o /dev/null -w "%{http_code}" \
   -X POST http://localhost:8059/mcp \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
   -d '{}'
 # → 401
 
@@ -356,6 +394,7 @@ curl -s -o /dev/null -w "%{http_code}" \
   -X POST http://localhost:8059/mcp \
   -H "Authorization: Bearer wrong-token" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
   -d '{}'
 # → 401
 ```
