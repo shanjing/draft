@@ -452,24 +452,24 @@ Both search and ingest use the same roots (vault, .doc_sources, .clones). **Excl
   └──────────────┘   └──────┬───────┘   └──────┬───────┘
                             │                  │
                             ▼                  │
-                     ┌──────────────┐         │
-                     │ Vector store │         │
-                     │ (Chroma/     │         │
-                     │  FAISS)      │         │
-                     └──────┬───────┘         │
+                     ┌──────────────┐          │
+                     │ Vector store │          │
+                     │ (Chroma/     │          │
+                     │  FAISS)      │          │
+                     └──────┬───────┘          │
                             │                  │
                             ▼                  ▼
                      ┌──────────────────────────────┐
-                     │  lib/ai_engine.py             │
-                     │  Semantic search → LLM        │
-                     │  (Claude API or local Qwen)   │
+                     │  lib/ai_engine.py            │
+                     │  Semantic search → LLM       │
+                     │  (Claude API or local Qwen)  │
                      └──────────────┬───────────────┘
                                     │
                                     ▼
                      ┌──────────────────────────────┐
                      │  Draft Chat UI               │
-                     │  Ask question → streamed      │
-                     │  answer + citation links      │
+                     │  Ask question → streamed     │
+                     │  answer + citation links     │
                      └──────────────────────────────┘
 ```
 
