@@ -21,6 +21,7 @@ This document is a **single engineering reference** for Draft. It combines desig
 **Data sources and operations**
 
 Draft supports six source types. How each is added and whether Draft copies or reads in-place is fixed by type:
+(x_post along with browser plugin drop features are W.I.P.)
 
 | Type | Description | Storage under DRAFT_HOME | Copy/pull policy | Pull operation |
 |------|-------------|--------------------------|------------------|----------------|
@@ -30,7 +31,7 @@ Draft supports six source types. How each is added and whether Draft copies or r
 | **local_git** | Local git repo (has `url` from origin) | None (read in-place) | No copy | None (`url` is display only) |
 | **local_file** | Local single `.md` file | None (read in-place) | No copy | None |
 | **x_post** | X/Twitter post URL | `.x_posts/<name>/` (future) | Draft fetches once | None (fetch-on-add; not yet implemented) |
-[x_post feature is W.I.P. along with browser plugin drop]
+
 **Operations by type:**
 
 1. **github** — Clone to `~/.draft/.clones/<name>` (or pull); record in `sources.yaml` with `source` (URL) and `url`. Draft runs Pull (git pull).
