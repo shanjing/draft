@@ -86,6 +86,85 @@ DRAFT_HOME=/path/to/.draft python scripts/serve_mcp.py
 
 ---
 
+### MCP Token
+
+#### How Draft manages the token
+
+Draft uses a single Bearer token for all HTTP clients (curl, Claude Desktop HTTP, MCP SDK).
+
+| Deployment | Source of truth | Survives restart? |
+|---|---|---|
+| Local daemon (`draft.sh mcp`) | `.env` — `DRAFT_MCP_TOKEN=<value>` | ✅ Yes — same `.env` on every start |
+| Kubernetes | `values.local.yaml` — `mcp.token: <value>` → Kubernetes Secret | ✅ Yes — if set in values; ❌ No — if left empty (`helm upgrade` overwrites with empty) |
+| Auto-generated (no token set) | Printed to stderr on startup only | ❌ No — new token each restart |
+
+**Rule:** always set an explicit token. Auto-generation is convenient for a first run but breaks clients after any restart.
+
+#### Generate a token
+
+```bash
+openssl rand -base64 32
+```
+
+#### Local: set token in `.env`
+
+```bash
+# Add or update in .env at repo root
+echo "DRAFT_MCP_TOKEN=$(openssl rand -base64 32)" >> .env
+# Then restart the server
+./draft.sh mcp restart
+```
+
+#### Kubernetes: set token in `values.local.yaml` (recommended)
+
+Add once — every `helm upgrade` will preserve it:
+
+```yaml
+# kubernetes/draft/values.local.yaml  (gitignored)
+mcp:
+  token: "<output of: openssl rand -base64 32>"
+```
+
+Then upgrade:
+```bash
+helm upgrade draft ./kubernetes/draft -n draft \
+  -f kubernetes/draft/values.mcp.yaml \
+  -f kubernetes/draft/values.local.yaml
+```
+
+#### Get the current token from a running cluster
+
+```bash
+kubectl -n draft get secret draft \
+  -o jsonpath='{.data.DRAFT_MCP_TOKEN}' | base64 -d
+```
+
+If the secret is empty (token was auto-generated), read it from the pod logs:
+
+```bash
+kubectl logs -n draft deployment/draft -c mcp | grep -i "generated token"
+```
+
+Then pin it in `values.local.yaml` and run `helm upgrade` so it persists across future upgrades.
+
+#### Upgrade without losing the existing token
+
+If `mcp.token` is not yet set in `values.local.yaml`, use this pattern to read the live token and
+pass it through the upgrade in one step — so clients don't need to re-authenticate:
+
+```bash
+TOKEN=$(kubectl -n draft get secret draft -o jsonpath='{.data.DRAFT_MCP_TOKEN}' | base64 -d)
+helm upgrade draft ./kubernetes/draft -n draft \
+  --set mcp.token="$TOKEN" \
+  -f kubernetes/draft/values.mcp.yaml \
+  -f kubernetes/draft/values.local.yaml
+```
+
+After the upgrade, add `mcp.token: "<TOKEN>"` to `values.local.yaml` so future upgrades preserve it
+automatically without the `--set` flag.
+
+---
+
 ## Running Modes
 
 ### 1. Local daemon — `draft.sh mcp` (recommended for local use)
@@ -141,83 +220,9 @@ Each tool call emits one JSON line to `~/.draft/draft-mcp.log`:
 {"ts": 1741442324.1, "levelname": "INFO", "message": "ok", "tool": "retrieve_chunks", "duration_ms": 41.2, "status": "ok"}
 ```
 
-### 5. Kubernetes / Helm (local Kubernetes or cloud)
+### 5. Kubernetes / Helm
 
-(Production grade K8 operation guide will be provided for GKE/EKS)
-
-The Helm chart at `kubernetes/draft/` deploys the MCP server to any Kubernetes cluster.
-
-**Prerequisites:** Helm 3, `draft:latest` image accessible to all cluster nodes.
-
-**Load image into local Kubernetes** (when the image is not in a registry):
-
-```bash
-# Save image to tar
-docker save draft:latest -o /tmp/draft-latest.tar
-
-# kind: kind load docker-image draft:latest
-
-# Local Kubernetes cluster (multi-node) — copy tar to each node and import:
-#   for node in <worker-1> <worker-2>; do
-#     scp /tmp/draft-latest.tar ${node}:/tmp/draft-latest.tar
-#     ssh $node "sudo ctr -n k8s.io images import /tmp/draft-latest.tar"
-#   done
-```
-
-**Install:**
-
-```bash
-# Extract the token from .env and run the upgrade
-MCP_TOKEN=$(grep DRAFT_MCP_TOKEN .env | cut -d '=' -f2) && \
-helm install draft ./kubernetes/draft \
-  --namespace draft --create-namespace \
-  --set image.pullPolicy=Never \
-  --set mcp.token="$MCP_TOKEN" \
-  --set hfCache.hostPath=/path/to/ai_models     # omit if downloading from HF Hub
-```
-
-**Verify:**
-
-```bash
-kubectl get pods -n draft
-kubectl port-forward svc/draft 8059:8059 -n draft
-curl http://localhost:8059/health
-# → {"status": "ok", "llm_ready": ..., "index_ready": ...}
-```
-
-**Bootstrap DRAFT_HOME (sources and docs)**  
-The pod’s PVC starts empty: no `sources.yaml` and no `.doc_sources/`. So `list_sources` and `retrieve_chunks` will be empty until you supply sources and content.
-
-- **Option A — Helm values (recommended):** Copy `kubernetes/draft/values.mcp.yaml` to `kubernetes/draft/values.local.yaml` (gitignored), fill in your real host paths, and deploy with both overlays: `helm upgrade draft ./kubernetes/draft -n draft -f kubernetes/draft/values.mcp.yaml -f kubernetes/draft/values.local.yaml`. `sourcesConfig` is the YAML body for `sources.yaml` (repos and their container-side `source` paths). `docSources` mounts host paths read-only into the pod; each `source` in `sourcesConfig` must match a `mountPath`. The chart mounts `sources.yaml` from a ConfigMap and the doc dirs from hostPath. No pull in-pod; the indexer reads mounted docs directly. See `kubernetes/draft/values.yaml` for all options.
-- **Option B — Manual:** Create `sources.yaml` and `.doc_sources/` (or run `pull`) inside the pod or via a Job that uses the same PVC, then run the RAG indexer in the pod. See `docs/container_orchestration.md` for disk layout and `scripts/pull.py` for pull behavior.
-
-After bootstrap, run the indexer so `index_ready` is true and `retrieve_chunks` returns results:
-
-```bash
-kubectl -n draft exec deployment/draft -- python -c "
-from scripts.index_for_ai import main
-main(['--profile', 'quick'])
-"
-```
-
-**Configure LLM after install:**
-
-```bash
-helm upgrade draft ./kubernetes/draft --namespace draft \
-  --reuse-values \
-  --set env.llmProvider=claude \
-  --set env.llmModel=claude-sonnet-4-6 \
-  --set secrets.anthropicApiKey="sk-ant-..."
-```
-
-**Uninstall:**
-
-```bash
-helm uninstall draft --namespace draft
-kubectl delete namespace draft   # also deletes the PVC
-```
-
-See `docs/container_orchestration.md` for the full Kubernetes reference, all Helm values, and OTel configuration.
+For Kubernetes deployment and operations, see **[Container orchestration → Kubernetes Operations Runbook](container_orchestration.md#kubernetes-operations-runbook)**.
 
 ---
 
@@ -247,388 +252,6 @@ docker stop draft-mcp && docker rm draft-mcp
 ```
 
 > **Note:** If using Ollama on the host, `.env.docker` sets `OLLAMA_HOST=http://host.docker.internal:11434`. On Linux replace with `http://172.17.0.1:11434` or use `--network=host`.
-
----
-
-## Kubernetes Operations
-
-Complete SRE runbook for managing Draft in Kubernetes: config changes, deploy, index, and verify.
-
-**Files involved:**
-
-| File | Purpose | Committed? |
-|------|---------|-----------|
-| `kubernetes/draft/values.yaml` | Default values — do not edit for deployments | Yes |
-| `kubernetes/draft/values.mcp.yaml` | `sourcesConfig` only — container-side source paths. Safe to commit; no host paths. | Yes |
-| `kubernetes/draft/values.local.yaml` | Local cluster behaviour + host paths: `image.pullPolicy`, `hfCache.hostPath`, `env.hfHubOffline`, `docSources`. Gitignored; lives next to `values.mcp.yaml`. | No (gitignored) |
-
-**Why two files:** Helm arrays don't merge — a later `-f` file fully replaces an earlier array. `values.mcp.yaml` owns the pod's view (`sourcesConfig` — container paths, safe to commit). `values.local.yaml` owns the host's view (`docSources` — real host paths) plus local cluster settings (`image.pullPolicy: Never`, pre-cached HF models). Neither is redundant; together they produce a complete config.
-
----
-
-### Helm values reference
-
-#### `values.yaml` — defaults (all environments)
-
-| Value | Default | Description |
-|-------|---------|-------------|
-| `replicaCount` | `1` | Number of pod replicas. Keep at 1 — the PVC is ReadWriteOnce. |
-| `image.repository` | `draft` | Image name for local clusters; full registry path for cloud (e.g. `gcr.io/my-project/draft`). |
-| `image.tag` | `latest` | Image tag. Pin to a SHA or semver in production. |
-| `image.pullPolicy` | `IfNotPresent` | Cloud default. Set `Never` (local: no registry) or `Always` (CI/CD with mutable tag) in `values.local.yaml`. |
-| `mcp.port` | `8059` | Port the MCP HTTP server listens on inside the container. Must match `service.port`. |
-| `mcp.token` | `""` | Bearer token for MCP auth. Auto-generated at startup if empty (printed to stderr). Set a stable value so it survives restarts. Generate with `openssl rand -base64 32`. |
-| `mcp.existingSecret` | `""` | Name of a pre-existing Kubernetes Secret with key `DRAFT_MCP_TOKEN`. Use for GitOps / external secret managers. Overrides `mcp.token`. |
-| `draftHome` | `/data/draft` | `DRAFT_HOME` inside the container. All app state lives here. Must match the PVC mount path. |
-| `persistence.enabled` | `true` | Create a PVC for `DRAFT_HOME`. Set `false` only for quick ephemeral tests. |
-| `persistence.storageClass` | `""` | StorageClass for the PVC. Empty = cluster default (local-path for kind; gp2/pd-ssd for cloud). |
-| `persistence.size` | `2Gi` | PVC size. Increase to 5–10 Gi if you have many sources or larger embedding models. |
-| `persistence.accessMode` | `ReadWriteOnce` | Standard for single-replica. Change only with a multi-replica + shared-storage setup. |
-| `sourcesConfig` | `""` | YAML body for `sources.yaml`, injected via ConfigMap and mounted at `DRAFT_HOME/sources.yaml`. Set in `values.mcp.yaml`, not here. |
-| `docSources` | `[]` | List of `{name, hostPath, mountPath}`. Each entry creates a read-only hostPath volume in the pod. **Arrays do not merge across `-f` files** — define the full list in one file (`values.local.yaml`). |
-| `hfCache.hostPath` | `""` | Host node path to mount as the HuggingFace model cache (`DRAFT_HOME/.cache/huggingface`). Empty = models download to PVC on first use. Set in `values.local.yaml` for local clusters. |
-| `env.hfHubOffline` | `"0"` | `"1"` blocks all HF Hub network access (use when all models are pre-cached). `"0"` allows downloads at runtime. |
-| `env.llmProvider` | `""` | LLM provider for AI Q&A: `claude`, `gemini`, `openai`, `ollama`. Empty = AI Q&A disabled. |
-| `env.llmModel` | `""` | Model name for the chosen provider (e.g. `claude-sonnet-4-6`, `gpt-4o`, `qwen3:8b`). |
-| `secrets.anthropicApiKey` | `""` | Anthropic API key. Required when `env.llmProvider=claude`. Pass via `--set` at deploy time. |
-| `secrets.geminiApiKey` | `""` | Google AI API key. Required when `env.llmProvider=gemini`. |
-| `secrets.openaiApiKey` | `""` | OpenAI API key. Required when `env.llmProvider=openai`. |
-| `otel.serviceName` | `draft-mcp` | Service name tag on all traces and metrics (`OTEL_SERVICE_NAME`). |
-| `otel.otlpEndpoint` | `""` | OTLP HTTP collector endpoint. Empty = console exporter (output to pod logs or file). |
-| `otel.metricsLog` | `stdout` | Console exporter destination: `stdout` (pod logs, recommended) or a file path on the PVC. |
-| `service.type` | `ClusterIP` | Kubernetes Service type. Use `ClusterIP` + `kubectl port-forward` for local access. |
-| `service.port` | `8059` | Service port. Must match `mcp.port`. |
-| `resources` | `{}` | CPU/memory requests and limits. Recommended: `memory >= 1Gi` (embedding model ~500 MB + app). |
-| `nodeSelector` | `{}` | Constrain pod to nodes with specific labels. |
-| `tolerations` | `[]` | Allow pod to schedule on tainted nodes. |
-| `affinity` | `{}` | Node/pod affinity and anti-affinity rules. |
-
-#### `values.local.yaml` — local cluster overrides (gitignored)
-
-This file is never committed. It holds everything that is specific to your machine or local cluster.
-
-| Value | Example | Description |
-|-------|---------|-------------|
-| `image.pullPolicy` | `Never` | Required for kind/k3s/minikube — image is loaded locally, no registry. Use `Always` or `IfNotPresent` for cloud. |
-| `hfCache.hostPath` | `/Users/you/ai_models` | Absolute path on the host node to a pre-downloaded HuggingFace model cache. Mounted over `DRAFT_HOME/.cache/huggingface`. Models needed: `sentence-transformers/all-MiniLM-L6-v2` (~90 MB) and `cross-encoder/ms-marco-MiniLM-L-6-v2` (~67 MB). |
-| `env.hfHubOffline` | `"1"` | Set `"1"` when `hfCache.hostPath` is populated — blocks HF Hub network access and prevents startup delays. |
-| `docSources[].name` | `runbooks` | Kubernetes volume name — unique, lowercase, no underscores. Used internally; not visible to the app. |
-| `docSources[].hostPath` | `/Volumes/External/docs/runbooks` | Absolute path on the **host node** to the document directory. Must exist before the pod starts. |
-| `docSources[].mountPath` | `/mnt/docs/runbooks` | Path **inside the container** where the directory appears. Must exactly match the corresponding `source:` entry in `values.mcp.yaml` `sourcesConfig`. |
-
----
-
-### Local Kubernetes (Mac Mini / kind / on-prem)
-
-#### First-time setup
-
-```bash
-# 1. Build image
-docker build -t draft:latest .
-
-# 2. Load image into local cluster (kind is required, brew install kind)
-kind load docker-image draft:latest
-# For other local clusters: scp the tar to each node and import with ctr
-
-# 3. Create kubernetes/draft/values.local.yaml (gitignored — never committed)
-#    Local cluster behaviour + host-specific paths. Three categories:
-#      image.pullPolicy  — Never: image only exists locally (kind load), no registry
-#      hfCache.hostPath  — pre-downloaded models on the host; avoids re-downloading at startup
-#      env.hfHubOffline  — "1": block HF Hub network access (all models are pre-cached)
-#      docSources        — real host paths for each document directory
-#    (values.mcp.yaml holds sourcesConfig — the container-side source paths, committed.)
-cat > kubernetes/draft/values.local.yaml << 'EOF'
-# Local image loaded via: kind load docker-image draft:latest
-# Never pull from a registry — the image only exists locally.
-image:
-  pullPolicy: Never
-
-# Pre-downloaded HuggingFace models on the host node.
-# Mounted into the pod so models are available immediately without downloading.
-hfCache:
-  hostPath: /Users/you/ai_models   # adjust to your actual models directory
-
-# Models are pre-cached on the host — disable HF Hub network access.
-env:
-  hfHubOffline: "1"
-
-# Host-path mounts for document source directories.
-# mountPath must match the source paths in kubernetes/draft/values.mcp.yaml sourcesConfig.
-docSources:
-  - name: runbooks
-    hostPath: /Volumes/External/draft_mcp_doc/runbooks
-    mountPath: /mnt/docs/runbooks
-  - name: engineering
-    hostPath: /Volumes/External/draft_mcp_doc/engineering
-    mountPath: /mnt/docs/engineering
-  - name: others
-    hostPath: /Volumes/External/draft_mcp_doc/others
-    mountPath: /mnt/docs/others
-EOF
-# Adjust hostPath values to match your actual directories.
-
-# 4. Install
-helm install draft ./kubernetes/draft \
-  --namespace draft --create-namespace \
-  --set mcp.token="$(openssl rand -base64 32)" \
-  -f kubernetes/draft/values.mcp.yaml \
-  -f kubernetes/draft/values.local.yaml
-# image.pullPolicy=Never, hfCache.hostPath, and hfHubOffline are set in values.local.yaml
-
-# 5. Verify pod is running
-kubectl get pods -n draft
-kubectl logs deployment/draft -n draft | tail -20
-```
-
-#### Updating source paths or adding a new doc directory
-
-```bash
-# 1. Edit kubernetes/draft/values.mcp.yaml — add the new repo entry to sourcesConfig
-# 2. Edit kubernetes/draft/values.local.yaml — add the corresponding docSources entry with the real hostPath
-# 3. Upgrade
-helm upgrade draft ./kubernetes/draft -n draft \
-  -f kubernetes/draft/values.mcp.yaml \
-  -f kubernetes/draft/values.local.yaml
-
-# 4. Confirm sources.yaml is correct inside the pod
-kubectl -n draft exec deployment/draft -- cat /data/draft/sources.yaml
-
-# 5. Confirm the new directory is visible
-kubectl -n draft exec deployment/draft -- ls /mnt/docs/<new-source> | head -10
-```
-
-#### Applying changes to Draft Kubernetes deployment
-
-After editing any values file, re-apply with `helm upgrade`. Any change to volumes (`hfCache.hostPath`, `docSources`) or env vars triggers an automatic pod restart.
-
-**Local Kubernetes (kind / on-prem)** — edit `values.local.yaml` then:
-
-```bash
-helm upgrade draft ./kubernetes/draft -n draft \
-  -f kubernetes/draft/values.mcp.yaml \
-  -f kubernetes/draft/values.local.yaml
-```
-
-**Cloud (GKE / EKS / AKS)** — pass changed values as `--set` flags or update `values.mcp.yaml`, then:
-
-```bash
-helm upgrade draft ./kubernetes/draft -n draft \
-  --reuse-values \
-  --set image.tag=<new-tag> \        # if deploying a new image
-  -f kubernetes/draft/values.mcp.yaml
-```
-
-**Verify after upgrade:**
-
-```bash
-# Pod restarted and is running
-kubectl get pods -n draft
-
-# Confirm env vars applied
-kubectl -n draft exec deployment/draft -- env | grep -E 'HF_HUB|LLM|DRAFT'
-
-# Confirm hfCache volume is mounted (local only)
-kubectl get pod -n draft -o jsonpath='{.items[0].spec.volumes}' | python3 -m json.tool | grep -A3 hfcache
-```
-
-#### Updating the LLM provider or API key
-
-```bash
-helm upgrade draft ./kubernetes/draft -n draft \
-  --reuse-values \
-  --set env.llmProvider=claude \
-  --set env.llmModel=claude-sonnet-4-6 \
-  --set secrets.anthropicApiKey="sk-ant-..."
-```
-
-#### Rebuilding the RAG index (Kubernetes hosted MCP)
-Note: the discussion here is for use Draft as an MCP server hosted in Kubernetes. This is different than using Draft as PKB.
-
-The index lives on the PVC and survives pod restarts, image rebuilds, and `helm upgrade`. It only
-needs rebuilding when **content** changes, not when code changes:
-
-| Event | Rebuild needed? |
-|-------|----------------|
-| New or updated `.md` files in a doc source directory | ✅ Yes |
-| Embedding model changed (code or config) | ✅ Yes |
-| Cold start — new PVC after `helm uninstall` | ✅ Yes |
-| `docker build` + image load + `kubectl rollout restart` | ❌ No |
-| `helm upgrade` (config change only) | ❌ No |
-| Pod crash / container restart | ❌ No |
-
-**Cold start is handled automatically.** The chart deploys an init container (`index-builder`) that
-runs before the MCP server starts. It checks whether the vector store already exists:
-- **Empty PVC** (first deploy or after `helm uninstall`): builds the index automatically — no manual
-  `kubectl exec` needed. The MCP server starts with `index_ready: true`.
-- **Non-empty PVC** (normal restart): exits in < 1 second with no delay.
-
-To disable automatic cold-start builds (e.g. you manage indexing externally):
-```bash
-helm upgrade draft ./kubernetes/draft -n draft \
-  --set indexOnColdStart=false \
-  -f kubernetes/draft/values.mcp.yaml \
-  -f kubernetes/draft/values.local.yaml
-```
-
-Monitor the cold-start build:
-```bash
-kubectl logs -n draft -l app.kubernetes.io/name=draft -c index-builder -f
-```
-
-```bash
-# Quick rebuild — after new or updated docs (minutes)
-kubectl -n draft exec deployment/draft -- \
-  python scripts/index_for_ai.py --profile quick
-
-# Deep rebuild — after embedding model change (slower, re-embeds everything)
-kubectl -n draft exec deployment/draft -- \
-  python scripts/index_for_ai.py --profile deep
-
-# Expected output: "Indexed N chunks."  (N > 0 means success)
-```
-
-#### Rolling restart (pick up ConfigMap changes without helm upgrade)
-
-```bash
-kubectl rollout restart deployment/draft -n draft
-kubectl rollout status deployment/draft -n draft
-```
-
-#### Verify and test
-
-```bash
-# 1. Health check (unauthenticated)
-kubectl -n draft port-forward svc/draft 8059:8059 &
-curl http://localhost:8059/health
-# → {"status": "ok", "llm_ready": true, "index_ready": true, "version": "1.0"}
-# index_ready must be true before clients call retrieve_chunks
-
-# 2. Get the MCP token and establish session
-TOKEN=$(kubectl -n draft get secret draft -o jsonpath='{.data.DRAFT_MCP_TOKEN}' | base64 -d)
-BASE="http://localhost:8059/mcp"
-HEADERS=(-H "Authorization: Bearer $TOKEN" \
-         -H "Content-Type: application/json" \
-         -H "Accept: application/json, text/event-stream")
-
-SESSION=$(curl -si -X POST "$BASE" "${HEADERS[@]}" \
-  -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"sre-test","version":"1.0"}}}' \
-  | grep -i "mcp-session-id" | awk '{print $2}' | tr -d '\r')
-echo "Session: $SESSION"
-
-# 3. List sources — confirms sources.yaml is mounted and parsed
-curl -s -X POST "$BASE" "${HEADERS[@]}" -H "Mcp-Session-Id: $SESSION" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sources","arguments":{}}}' \
-  | grep '^data:' | cut -c7- | python3 -m json.tool
-# Expect: runbooks, engineering, others each with doc_count > 0
-
-# 4. Semantic search — confirms vector index is built
-curl -s -X POST "$BASE" "${HEADERS[@]}" -H "Mcp-Session-Id: $SESSION" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"retrieve_chunks","arguments":{"query":"deployment runbook","top_k":3,"rerank":true}}}' \
-  | grep '^data:' | cut -c7- | python3 -m json.tool
-# Expect: chunks with repo/path/text/score. If IndexNotReady, rebuild index first.
-```
-
-#### Uninstall
-
-```bash
-helm uninstall draft -n draft
-kubectl delete namespace draft    # also deletes the PVC (vector store, HF cache)
-```
-
----
-
-### Cloud Kubernetes (GKE / EKS / AKS)
-
-> Production-grade GKE/EKS guide is forthcoming. The steps below cover the key differences from local Kubernetes.
-
-#### Key differences from local
-
-| Concern | Local Kubernetes | Cloud Kubernetes |
-|---------|-----------------|-----------------|
-| Image delivery | `kind load` / node import | Push to registry (ECR, GCR, Artifact Registry) |
-| Doc sources | `hostPath` volumes on the node | CSI driver PV (e.g. Mountpoint for S3) or pre-populated PVC |
-| `image.pullPolicy` | `Never` (local image) | `Always` or `IfNotPresent` |
-| HF model cache | `hfCache.hostPath` on node | PVC (pre-populate or allow download at startup) |
-| Token storage | `--set mcp.token=...` | External Secret (AWS Secrets Manager, GCP Secret Manager) via `mcp.existingSecret` |
-
-#### Image: build and push to registry
-
-```bash
-# Build
-docker build -t <registry>/draft:latest .
-
-# Push
-docker push <registry>/draft:latest
-
-# Update values (or set in values file)
-helm upgrade draft ./kubernetes/draft -n draft \
-  --set image.repository=<registry>/draft \
-  --set image.tag=latest \
-  --set image.pullPolicy=Always \
-  -f kubernetes/draft/values.mcp.yaml \
-  -f kubernetes/draft/values.local.yaml
-```
-
-#### Doc sources: CSI-backed volumes (no code change)
-
-For S3 or other cloud storage, mount the bucket as a filesystem using a CSI driver. The app sees it as a local path — `sources.yaml` and app code are unchanged.
-
-```yaml
-# kubernetes/draft/values.local.yaml — cloud variant (replace hostPath with PVC backed by CSI driver)
-# docSources is left empty; volumes are defined manually or via a PV/PVC
-
-# 1. Install Mountpoint for Amazon S3 CSI driver (or equivalent for GCS/Azure Blob)
-# 2. Create a PersistentVolume + PersistentVolumeClaim bound to your S3 bucket
-# 3. Add a volumeMount + volume to the pod via a custom values overlay
-```
-
-The `sourcesConfig` in `values.mcp.yaml` stays identical — source paths like `/mnt/docs/runbooks` still work, regardless of whether the backing store is a host directory or an S3 CSI mount.
-
-#### Deploy
-
-```bash
-# Install
-helm install draft ./kubernetes/draft \
-  --namespace draft --create-namespace \
-  --set image.repository=<registry>/draft \
-  --set image.pullPolicy=Always \
-  --set mcp.existingSecret=draft-mcp-secret \   # pre-created Secret with DRAFT_MCP_TOKEN
-  --set env.llmProvider=claude \
-  --set env.llmModel=claude-sonnet-4-6 \
-  --set secrets.anthropicApiKey="sk-ant-..." \
-  --set persistence.storageClass=<your-storageclass> \
-  --set persistence.size=4Gi \
-  -f kubernetes/draft/values.mcp.yaml \
-  -f kubernetes/draft/values.local.yaml
-
-# Upgrade (after image push or config change)
-helm upgrade draft ./kubernetes/draft -n draft \
-  --reuse-values \
-  -f kubernetes/draft/values.mcp.yaml \
-  -f kubernetes/draft/values.local.yaml
-```
-
-#### Rebuild index (same as local)
-
-```bash
-kubectl -n draft exec deployment/draft -- \
-  python scripts/index_for_ai.py --profile quick
-```
-
-#### Verify (same as local, different access method)
-
-In cloud, use an Ingress or LoadBalancer instead of `port-forward`:
-
-```bash
-# Get external endpoint
-kubectl -n draft get svc draft
-
-# Or if behind an Ingress:
-curl https://<your-ingress-host>/health
-# → {"status": "ok", "llm_ready": true, "index_ready": true, "version": "1.0"}
-```
-
----
 
 ## Stopping the Server
 
@@ -688,13 +311,14 @@ python scripts/index_for_ai.py --profile quick
 ### Claude Desktop (stdio)
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
+(note: Claude Desktop and Claude Code access the MCP via local stdio and does not need the auth token)
 ```json
 {
   "mcpServers": {
     "draft": {
-      "command": "python",
+      "command": "/path/to/draft/.venv/bin/python",
       "args": ["/path/to/draft/scripts/serve_mcp.py", "--stdio"],
+      "cwd": "/path/to/draft",
       "env": {
         "DRAFT_HOME": "/Users/yourname/.draft"
       }
@@ -703,7 +327,38 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
+Replace `/path/to/draft` with the absolute path to your Draft repo (e.g. `/Users/yourname/workspace/draft`).
+
+**Two requirements for Claude Desktop:**
+- **Use the venv Python** — Claude Desktop does not activate any virtualenv; system `python` won't have Draft's dependencies. Use `.venv/bin/python` inside the repo.
+- **Use absolute paths** — Claude Desktop does not reliably honor `cwd`, so relative paths in `args` will fail. Both the Python path and the script path must be absolute.
+
 Restart Claude Desktop. In any conversation, Draft's tools will appear in the tool picker. The `answer_from_docs` prompt is available under the prompts menu.
+
+---
+
+### Claude Code (stdio)
+
+Use the `claude mcp add` command — Claude Code reads MCP config from `~/.claude.json`, not `~/.claude/settings.json`:
+
+```bash
+claude mcp add \
+  -e DRAFT_HOME=/Users/yourname/.draft \
+  -s user \
+  draft -- \
+  /path/to/draft/.venv/bin/python \
+  /path/to/draft/scripts/serve_mcp.py --stdio
+```
+
+Replace `/path/to/draft` and `/Users/yourname/.draft` with your actual paths. The `-s user` flag makes the server available across all projects (omit for project-local only).
+
+Verify registration:
+
+```bash
+claude mcp list
+```
+
+MCP servers connect at session start. **Start a new `claude` session** after adding the server, then run `/mcp` — you should see `draft` with `search_docs`, `retrieve_chunks`, `get_document`, `list_documents`, `list_sources`, and `query_docs`.
 
 ### HTTP client (any agent / curl)
 

@@ -66,13 +66,13 @@ When the MCP client is an LLM, the client IS the synthesis step. Calling `query_
 
 Draft is the right candidate for K8 runbook storage — it already handles doc ingestion (GitHub/local), chunking, vector indexing, and FTS. Adding S3 or other cloud doc roots later would require minimal code change (sync to a path under DRAFT_HOME; see engineering.md §7.1). A dedicated MCP inside the SRE agent would duplicate all of this unnecessarily.
 
-Optimal flow:
+A conceptual flow:
 ```
 K8 cluster → SRE agent detects OOMKilled
-SRE agent calls draft MCP: retrieve_chunks("OOMKilled pod memory limit exceeded", top_k=5)
+SRE agent (SudoRoot) calls draft MCP: retrieve_chunks("OOMKilled pod memory limit exceeded", top_k=5)
 Draft returns: [{heading, text, repo, path, score, start_line, end_line}]
 SRE agent LLM synthesizes diagnosis + remediation steps
-SRE agent acts
+...
 ```
 
 ---
@@ -283,27 +283,6 @@ One OTel span per tool call (`mcp.tool.<name>`) with `request_id` and `transport
 
 ---
 
-## File Changelist
-
-| File                           | Change                                                              |
-| ------------------------------ | ------------------------------------------------------------------- |
-| `draft_mcp/__init__.py`        | Package marker                                                      |
-| `draft_mcp/server.py`          | FastMCP server: tools, resources, prompt, HTTP+stdio entrypoints    |
-| `draft_mcp/tools/__init__.py`  | Package marker                                                      |
-| `draft_mcp/tools/search.py`    | `search_docs`, `retrieve_chunks`                                    |
-| `draft_mcp/tools/ask.py`       | `query_docs` (non-streaming, collects ask_stream internally)        |
-| `draft_mcp/tools/documents.py` | `get_document`, `list_documents`                                    |
-| `draft_mcp/tools/sources.py`   | `list_sources`                                                      |
-| `draft_mcp/auth.py`            | Bearer token Starlette middleware                                   |
-| `draft_mcp/errors.py`          | MCP error type wrappers                                             |
-| `draft_mcp/instrumentation.py` | OTel span + metrics + structured log per tool call (pre-existing)   |
-| `scripts/serve_mcp.py`         | Entrypoint (`--stdio` or Streamable HTTP); calls `draft_mcp.server` |
-| `requirements.txt`             | Added `mcp>=1.0`                                                    |
-
-**Not in MCP:** `pull_sources`, `rebuild_index`, `add_source`, `get_task_status` — CLI/UI only.
-
----
-
 ## Verification
 
 1. **Import check:**
@@ -328,20 +307,6 @@ One OTel span per tool call (`mcp.tool.<name>`) with `request_id` and `transport
 
 ## Kubernetes Deployment
 
-The MCP server is the primary deployment target in Kubernetes (Helm chart at `kubernetes/draft/`). The container runs `scripts/serve_mcp.py` on port 8059; no UI is deployed.
+The MCP server is the primary Kubernetes deployment target (Helm chart at `kubernetes/draft/`). Sources are injected via ConfigMap and hostPath mounts — no `pull.py` runs in-pod.
 
-**Sources are injected, not pulled.** In a pod, `sources.yaml` is mounted from a Helm-managed ConfigMap (`sourcesConfig` value), and document directories are mounted read-only from the host node (`docSources` values). The app reads those paths directly — no `pull.py` runs in-pod. When new `.md` files are added to a mounted directory, trigger an index rebuild.
-
-**Key config files:**
-
-| File | Role |
-|------|------|
-| `kubernetes/draft/values.yaml` | Defaults — not edited per deployment |
-| `kubernetes/draft/values.mcp.yaml` | Committed template: container-side source paths |
-| `kubernetes/draft/values.local.yaml` | Gitignored: your real host paths |
-
-**Operational runbook** (deploy, index, verify, cloud vs local):
-→ **[MCP Operations → Kubernetes Operations](MCP_operations.md#kubernetes-operations)**
-
-**Infrastructure reference** (Helm values, PVCs, OTel, resource limits):
-→ **[Container Orchestration → Kubernetes deployment guide](container_orchestration.md#kubernetes-deployment-guide)**
+→ **[Container orchestration](container_orchestration.md)** — infrastructure design, Helm values, Docker, and full K8s operational runbook.
