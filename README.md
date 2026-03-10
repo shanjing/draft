@@ -44,6 +44,13 @@ Expose your knowledge base as an **MCP server** for AI agents, Claude Desktop, e
 - **Retrieval-only mode** — deploy without an LLM; clients get search + chunks and synthesize answers themselves
 - **OpenTelemetry Observability** — for monitoring and debugging
 
+**Fully supports Claude Code/Desktop**
+
+<img width="1059" height="912" alt="ClaudeCodeMCP" src="https://github.com/user-attachments/assets/fdc84392-bf2c-4812-841e-9bdcc09003bb" />
+<img width="1022" height="763" alt="ClaudeDesktop_2" src="https://github.com/user-attachments/assets/32028568-ef26-4057-ad78-727733ce55ee" />
+
+**To start the MCP server**
+
 ```bash
 ./draft.sh mcp start    # local HTTP daemon (port 8059)
 ```
@@ -87,3 +94,7 @@ For maximum privacy: use a local inference stack, keep `HF_HUB_OFFLINE=1` in `.e
 ---
 
 For setup instructions, doc sources, and technical configuration see **[Setup.md](Setup.md)**.
+
+---
+
+Draft is the MCP server of my W.I.P. agentic cloud platform "PrincipalOps.ai" which consists of NeuralGate (Inference Design/Provisioning), SudoRoot (SRE Agents that handle 24x7 Production Support for Kubernetes, Inference and ML infrastructures). "ShipIt!" 🚀
