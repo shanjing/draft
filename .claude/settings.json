@@ -1,13 +1,36 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(sh 1)",
+      "Bash(kubectl config current-context)",
+      "Bash(kubectl cluster-info --request-timeout=5s)",
+      "Bash(minikube ssh --profile inference --node inference \"crictl images 2>/dev/null | grep draft || echo ''not found''\")",
+      "Bash(minikube addons enable registry --profile inference)",
+      "Bash(kubectl get svc -n kube-system)",
+      "Bash(MINIKUBE_PROFILE=inference minikube node list)",
+      "Bash(MINIKUBE_PROFILE=inference minikube image load /tmp/draft-latest.tar --overwrite)",
+      "Bash(MINIKUBE_PROFILE=inference minikube ssh --native-ssh=false -n $node -- \"sudo ctr -n k8s.io images ls | grep draft\")",
+      "Bash(MINIKUBE_PROFILE=inference minikube ssh --native-ssh=false -n $node -- \"sudo ctr -n k8s.io images ls | grep draft | awk ''{print $1, $5}''\")",
+      "Bash(MINIKUBE_PROFILE=inference kubectl create namespace draft --dry-run=client -o yaml)",
+      "Bash(MINIKUBE_PROFILE=inference kubectl apply -f -)",
+      "Bash(chmod +x /Volumes/External/workspace/draft/draft.sh)",
+      "Bash(./draft.sh status)",
+      "Bash(./draft.sh mcp start)",
+      "Bash(./draft.sh mcp restart)",
+      "Bash(./draft.sh mcp stop)",
+      "Bash(sed -i '' 's/| `kubernetes\\\\/draft\\\\/values.yaml` | All configurable values with defaults and inline comments |/| `kubernetes\\\\/draft\\\\/values.yaml` | All configurable values with defaults and inline comments |\\\\n| `kubernetes\\\\/draft\\\\/values.mcp.yaml` | Committed overlay template: `sourcesConfig` + `docSources` with placeholder host paths. Copy to `values.local.yaml` and fill in real paths before deploying. |\\\\n| `values.local.yaml` | **Gitignored.** Your real host paths \\(e.g. `\\\\/Volumes\\\\/External\\\\/...`\\). Layered on top of `values.mcp.yaml` at deploy time: `helm upgrade ... -f kubernetes\\\\/draft\\\\/values.mcp.yaml -f values.local.yaml`. |/' /Volumes/External/workspace/draft/docs/container_orchestration.md)",
+      "Bash(sed -i '' 's/| `kubernetes\\\\/draft\\\\/templates\\\\/configmap.yaml` | Non-secret env: DRAFT_HOME, HF_HUB_OFFLINE, LLM provider, OTel |/| `kubernetes\\\\/draft\\\\/templates\\\\/configmap.yaml` | Non-secret env: DRAFT_HOME, HF_HUB_OFFLINE, LLM provider, OTel |\\\\n| `kubernetes\\\\/draft\\\\/templates\\\\/configmap-sources.yaml` | `sources.yaml` ConfigMap \\(rendered from `sourcesConfig`\\); mounted at `DRAFT_HOME\\\\/sources.yaml` via `subPath` |/' /Volumes/External/workspace/draft/docs/container_orchestration.md)",
+      "Bash(kubernetes/draft/values.local.yaml:*)",
+      "Read(//Volumes/External/draft_mcp_doc/**)",
+      "Bash(kubectl get nodes -n draft -o wide)",
+      "Bash(kubectl get pv,pvc -n draft)",
+      "Bash(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{\"\"\\\\t\"\"}{.metadata.labels}{\"\"\\\\n\"\"}{end}')"
+    ]
+  },
   "enabledPlugins": {
     "pyright-lsp@claude-plugins-official": true
   },
   "projectConventions": {
     "scriptsCli": "Use Click for CLI parsing in scripts (e.g. serve_mcp.py, serve.py, pull.py, ask.py). No argparse for new or updated script entrypoints."
-  },
-  "permissions": {
-    "allow": [
-      "Bash(sh 1)"
-    ]
   }
 }

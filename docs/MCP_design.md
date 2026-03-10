@@ -64,7 +64,7 @@ When the MCP client is an LLM, the client IS the synthesis step. Calling `query_
 
 ### SRE Runbook use case
 
-Draft is the right candidate for K8 runbook storage — it already handles doc ingestion (GitHub/local), chunking, vector indexing, and FTS. A dedicated MCP inside the SRE agent would duplicate all of this unnecessarily.
+Draft is the right candidate for K8 runbook storage — it already handles doc ingestion (GitHub/local), chunking, vector indexing, and FTS. Adding S3 or other cloud doc roots later would require minimal code change (sync to a path under DRAFT_HOME; see engineering.md §7.1). A dedicated MCP inside the SRE agent would duplicate all of this unnecessarily.
 
 Optimal flow:
 ```
@@ -323,3 +323,25 @@ One OTel span per tool call (`mcp.tool.<name>`) with `request_id` and `transport
 5. **Auth:** No token → `401`; wrong token → `401`; correct token → `200`
 6. **query_docs:** No index → structured `IndexNotReady` error; with index + LLM → `{answer, citations}`
 7. **Health:** `GET http://localhost:8059/health` → `{"status": "ok", "llm_ready": true, "index_ready": true}`
+
+---
+
+## Kubernetes Deployment
+
+The MCP server is the primary deployment target in Kubernetes (Helm chart at `kubernetes/draft/`). The container runs `scripts/serve_mcp.py` on port 8059; no UI is deployed.
+
+**Sources are injected, not pulled.** In a pod, `sources.yaml` is mounted from a Helm-managed ConfigMap (`sourcesConfig` value), and document directories are mounted read-only from the host node (`docSources` values). The app reads those paths directly — no `pull.py` runs in-pod. When new `.md` files are added to a mounted directory, trigger an index rebuild.
+
+**Key config files:**
+
+| File | Role |
+|------|------|
+| `kubernetes/draft/values.yaml` | Defaults — not edited per deployment |
+| `kubernetes/draft/values.mcp.yaml` | Committed template: container-side source paths |
+| `kubernetes/draft/values.local.yaml` | Gitignored: your real host paths |
+
+**Operational runbook** (deploy, index, verify, cloud vs local):
+→ **[MCP Operations → Kubernetes Operations](MCP_operations.md#kubernetes-operations)**
+
+**Infrastructure reference** (Helm values, PVCs, OTel, resource limits):
+→ **[Container Orchestration → Kubernetes deployment guide](container_orchestration.md#kubernetes-deployment-guide)**

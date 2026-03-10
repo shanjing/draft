@@ -25,7 +25,7 @@ Draft is designed so that **configuration is outside the image** and **models ar
 - **No restart for config changes:** You mount `.env` (Docker) or update ConfigMap/Secret (Kubernetes). The app re-reads on each request. So you can change models and endpoints without restarting the container or pod.
 - **Unified LLM endpoint:** One URL (`DRAFT_LLM_ENDPOINT`) plus optional API key supports both Ollama-style and OpenAI-compatible backends. In Kubernetes you can point Draft at any in-cluster or public LLM by updating the endpoint.
 
-The sections below give concrete steps for **Docker** and **Kubernetes**. Example manifests are in the **`deployment/`** directory.
+The sections below give concrete steps for **Docker** and **Kubernetes**.
 
 ---
 
@@ -47,7 +47,7 @@ Use **2×** the estimated usage for headroom:
 | **DRAFT_HOME** (data + HF cache) | 1.5 GB | **4 Gi** |
 
 - **Docker:** Mount `~/.draft` (or your data dir). HF cache is at `DRAFT_HOME/.cache/huggingface`; you do not need a separate volume. The host should have at least **4 GB free** before you run.
-- **Kubernetes:** Use one PVC (`draft-data-pvc`) at **4 Gi**. HF cache is under the same mount. See `pvc.yaml`.
+- **Kubernetes:** Use one PVC for DRAFT_HOME at **2–4 Gi** (2 Gi default in the Helm chart; increase `persistence.size` if you index many repos or use deep embed models).
 
 ---
 
@@ -133,50 +133,167 @@ When you change embed, encoder, or LLM in `.env`, you do not need to restart; th
 
 ## Kubernetes deployment guide
 
-Draft uses standard Kubernetes patterns: one **Deployment**, one **Service**, config from **ConfigMap** and **Secret**, and persistent storage from **PersistentVolumeClaim**. Use the **unified LLM endpoint** (`DRAFT_LLM_ENDPOINT`). Then when you change the endpoint URL (e.g. in a ConfigMap), the app points at another in-cluster deployment or a public LLM without image changes or pod restart.
+The Kubernetes deployment uses a **Helm chart** at `kubernetes/draft/`. It deploys the **MCP server** (HTTP transport, port 8059) — Draft's primary programmatic interface for AI clients. No Dockerfile changes are needed; the chart overrides the container command to start the MCP server instead of the UI.
 
 ### Prerequisites
 
-- A **PersistentVolumeClaim** for Draft data (sources, vault, .doc_sources, .vector_store, .cache/huggingface). Default size: **4 Gi** (see [Disk space](#disk-space)).
-- **ConfigMap** and **Secret** with the same variables you would put in `.env` (see Docker section). Prefer **DRAFT_LLM_ENDPOINT** and, for OpenAI-compatible backends, **DRAFT_LLM_API_KEY** and **DRAFT_LLM_MODEL**.
+- **Helm 3** installed.
+- The `draft` image built and accessible to your cluster:
+  ```bash
+  docker build -t draft .
+  # For a remote cluster, push to your registry and update image.repository / image.tag in values.yaml
+  ```
+- A cluster with a StorageClass that supports `ReadWriteOnce` PVCs (most managed clusters provide one by default).
 
-### Example manifests
+### Install
 
-Example manifests are in the **`deployment/`** directory at the repo root:
+```bash
+helm install draft ./kubernetes/draft
+```
+
+To set a stable Bearer token and LLM provider at install time:
+
+```bash
+helm install draft ./kubernetes/draft \
+  --set mcp.token="$(openssl rand -base64 32)" \
+  --set env.llmProvider=claude \
+  --set secrets.anthropicApiKey="sk-ant-..."
+```
+
+### Key values
+
+| Value | Default | Description |
+|-------|---------|-------------|
+| `replicaCount` | `1` | Number of MCP server pods |
+| `image.repository` | `draft` | Container image name |
+| `image.tag` | `latest` | Container image tag |
+| `mcp.port` | `8059` | MCP HTTP server port |
+| `mcp.token` | `""` | Bearer token (auto-generated if empty; check pod logs) |
+| `mcp.existingSecret` | `""` | Use a pre-existing Secret for `DRAFT_MCP_TOKEN` |
+| `draftHome` | `/data/draft` | `DRAFT_HOME` inside the container (must match PVC mount) |
+| `persistence.size` | `2Gi` | PVC size for DRAFT_HOME (sources, vector store, HF cache) |
+| `persistence.storageClass` | `""` | StorageClass for PVC (empty = cluster default) |
+| `env.llmProvider` | `""` | LLM provider: `claude`, `gemini`, `openai`, or `ollama` |
+| `env.llmModel` | `""` | Model name for the chosen provider |
+| `secrets.anthropicApiKey` | `""` | Anthropic API key (stored in a k8s Secret) |
+| `secrets.geminiApiKey` | `""` | Gemini API key |
+| `secrets.openaiApiKey` | `""` | OpenAI API key |
+| `otel.serviceName` | `draft-mcp` | OTel service name (`OTEL_SERVICE_NAME`) |
+| `otel.otlpEndpoint` | `""` | OTLP collector endpoint; if set, enables OTLP exporters |
+| `otel.metricsLog` | `stdout` | Metrics output: `stdout` (pod logs) or a file path on the PVC |
+| `service.type` | `ClusterIP` | Kubernetes Service type |
+| `resources` | `{}` | CPU/memory requests and limits for the MCP container |
+
+Override any value with `--set key=value` or a custom values file passed with `-f`.
+
+### Helm chart structure
 
 | File | Description |
 |------|-------------|
-| `deployment/pvc.yaml` | PersistentVolumeClaim for Draft data (4 Gi; includes HF cache under DRAFT_HOME). |
-| `deployment/configmap.yaml` | Example ConfigMap (DRAFT_HOME, DRAFT_LLM_ENDPOINT, model names, etc.). |
-| `deployment/secret.yaml` | Example Secret for DRAFT_LLM_API_KEY and other secrets (optional). |
-| `deployment/rbac.yaml` | ServiceAccount, Role, and RoleBinding for the Draft pod. |
-| `deployment/deployment.yaml` | Draft UI Deployment with volume mounts and env from ConfigMap/Secret. |
-| `deployment/service.yaml` | Service (ClusterIP) that exposes the Draft UI on port 8058. |
+| `kubernetes/draft/Chart.yaml` | Chart metadata |
+| `kubernetes/draft/values.yaml` | All configurable values with defaults and inline comments |
+| `kubernetes/draft/values.mcp.yaml` | Committed overlay template: `sourcesConfig` + `docSources` with placeholder host paths. Pair with `kubernetes/draft/values.local.yaml` (gitignored) which supplies the real host paths. |
+| `kubernetes/draft/values.local.yaml` | **Gitignored.** `docSources` only — your real host paths (e.g. `/Volumes/External/...`). Lives next to `values.mcp.yaml`. Applied alongside it: `helm upgrade ... -f kubernetes/draft/values.mcp.yaml -f kubernetes/draft/values.local.yaml`. |
+| `kubernetes/draft/templates/deployment.yaml` | MCP server Deployment (1 replica by default) |
+| `kubernetes/draft/templates/service.yaml` | ClusterIP Service on port 8059 |
+| `kubernetes/draft/templates/configmap.yaml` | Non-secret env: DRAFT_HOME, HF_HUB_OFFLINE, LLM provider, OTel |
+| `kubernetes/draft/templates/configmap-sources.yaml` | `sources.yaml` ConfigMap (rendered from `sourcesConfig`); mounted at `DRAFT_HOME/sources.yaml` via `subPath` |
+| `kubernetes/draft/templates/secret.yaml` | DRAFT_MCP_TOKEN and LLM API keys |
+| `kubernetes/draft/templates/pvc.yaml` | PVC for DRAFT_HOME (2 Gi default) |
+| `kubernetes/draft/templates/_helpers.tpl` | Helm template helpers |
 
-Adjust namespace, image name, and PVC names to match your cluster. **Apply order:** PVCs → ConfigMap → Secret → RBAC → Deployment → Service. Push the `draft-ui` image to a registry your cluster can pull from, or use a local image and set `imagePullPolicy: Never` for testing.
+### LLM configuration in Kubernetes
 
-### Unified LLM endpoint in Kubernetes
+Set the provider and API key via values:
 
-Set **DRAFT_LLM_ENDPOINT** in the Draft pod to the URL of your LLM service:
+```bash
+# Claude
+helm upgrade draft ./kubernetes/draft \
+  --set env.llmProvider=claude \
+  --set env.llmModel=claude-sonnet-4-6 \
+  --set secrets.anthropicApiKey="sk-ant-..."
 
-- **Ollama in cluster:** `DRAFT_LLM_ENDPOINT=http://ollama.<namespace>.svc.cluster.local:11434`, and set **OLLAMA_MODEL**.
-- **OpenAI-compatible in cluster or public:** Set **DRAFT_LLM_ENDPOINT**, **DRAFT_LLM_API_KEY** (from Secret), and **DRAFT_LLM_MODEL**.
+# Ollama in-cluster (no API key needed)
+helm upgrade draft ./kubernetes/draft \
+  --set env.llmProvider=ollama \
+  --set env.llmModel=qwen3:8b
+# Also set OLLAMA_HOST pointing at your in-cluster Ollama service via --set or a values file
+```
 
-When you update the endpoint (and key/model if needed) in ConfigMap or Secret, the next Ask uses the new target. You do not need to restart the pod.
+### OpenTelemetry in Kubernetes
+
+OTel requires no code changes. By default (`otel.metricsLog: stdout`), traces and metrics go to pod stdout, captured by `kubectl logs` and any log aggregator (Loki, Datadog, etc.).
+
+For full observability with an OTLP-compatible collector:
+
+```bash
+helm upgrade draft ./kubernetes/draft \
+  --set otel.otlpEndpoint="http://otel-collector.monitoring.svc.cluster.local:4318"
+```
+
+This switches OTel to OTLP HTTP exporters for both traces and metrics, compatible with Jaeger, Tempo, Prometheus, and any OTLP-capable backend.
 
 ### Differences from Docker
 
-| Docker | Kubernetes |
-|--------|------------|
-| `-v ~/.draft:/root/.draft` | Mount a **PVC** at e.g. `/data/draft` and set **DRAFT_HOME=/data/draft**. |
-| `--env-file .env` | Inject env from **ConfigMap** and **Secret** via `envFrom` or `env`. |
-| HF cache | Under `DRAFT_HOME/.cache/huggingface`; no separate volume. |
+| Docker | Kubernetes (Helm) |
+|--------|-------------------|
+| `-v ~/.draft:/root/.draft` | PVC mounted at `draftHome` (`/data/draft` by default) |
+| `--env-file .env` | ConfigMap (non-secret) + Secret (API keys, MCP token) |
+| `-e DRAFT_MCP_TOKEN=...` | `--set mcp.token=...` or `mcp.existingSecret` |
+| HF cache | Under `DRAFT_HOME/.cache/huggingface`; same PVC, no separate volume |
+
+### Verify the deployment
+
+```bash
+kubectl get pods
+kubectl port-forward svc/draft 8059:8059
+curl http://localhost:8059/health
+# → {"status": "ok", "llm_ready": ..., "index_ready": ...}
+```
+
+If `mcp.token` was not set, retrieve the auto-generated token from pod logs:
+
+```bash
+kubectl logs deployment/draft | grep "Generated token"
+```
 
 ### Resource limits
 
-If embed and rerank run in the Draft pod (Hugging Face path), set CPU and memory requests and limits on the Deployment. If the LLM is external (Ollama or gateway), the Draft pod can be smaller.
+If HF embed and reranker models run inside the pod, set memory `>= 1 Gi`. For external LLM (cloud API or in-cluster Ollama), the Draft pod itself is lightweight.
+
+```yaml
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+```
 
 ---
+
+## Kubernetes Operations Runbook
+
+The sections above cover infrastructure: Helm values, PVCs, config, and image delivery. For the day-to-day SRE workflow — updating source paths, deploying with values overlays, rebuilding the RAG index, and verifying the MCP server end-to-end — see:
+
+**[MCP Operations → Kubernetes Operations](MCP_operations.md#kubernetes-operations)**
+
+That section is the canonical operational runbook and covers:
+
+| Task | Where |
+|------|-------|
+| First-time setup (image load, values.local.yaml, helm install) | [Local Kubernetes](MCP_operations.md#local-kubernetes-mac-mini--kind--on-prem) |
+| Adding a new doc source / updating source paths | [Updating source paths](MCP_operations.md#updating-source-paths-or-adding-a-new-doc-directory) |
+| Rebuilding the RAG index after new docs | [Rebuilding the RAG index](MCP_operations.md#rebuilding-the-rag-index) |
+| Full verify + MCP test sequence (health → token → session → list\_sources → retrieve\_chunks) | [Verify and test](MCP_operations.md#verify-and-test) |
+| Cloud Kubernetes differences (image registry, CSI-backed S3 volumes, ExternalSecret) | [Cloud Kubernetes](MCP_operations.md#cloud-kubernetes-gke--eks--aks) |
+
+---
+
+## Container image optimization
+
+For detailed guidance on slimming the Docker image, multi-stage builds, virtualenv layout, and model cache handling, see **[Container optimization](container_optimization.md)**.
 
 ## Security
 
