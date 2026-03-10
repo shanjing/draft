@@ -18,24 +18,33 @@ from mcp.server.fastmcp import FastMCP
 
 from draft_mcp.errors import DraftMCPError
 from draft_mcp.instrumentation import instrument_tool_call  # noqa: F401 (re-exported for tools)
-from draft_mcp.tools.ask import query_docs as _query_docs
 from draft_mcp.tools.documents import get_document as _get_document
 from draft_mcp.tools.documents import list_documents as _list_documents
 from draft_mcp.tools.search import retrieve_chunks as _retrieve_chunks
 from draft_mcp.tools.search import search_docs as _search_docs
 from draft_mcp.tools.sources import list_sources as _list_sources
+from lib.ai_engine import llm_ready
+from lib.paths import get_draft_home
 
-mcp = FastMCP(
-    "draft",
-    instructions=(
-        "Draft is a document knowledge base with full-text and semantic search. "
-        "Use search_docs for fast keyword lookup. "
-        "Use retrieve_chunks for semantic search — it returns ranked document chunks "
-        "that you should synthesize into your answer. "
-        "Use query_docs only if you want Draft's LLM to answer for you (non-LLM clients). "
-        "Always cite sources by repo and path."
-    ),
+# Determine LLM availability once at startup. query_docs and answer_from_docs
+# are only registered when an LLM is configured. In retrieval-only deployments
+# (e.g. Kubernetes pod with no LLM provider) the tool list stays lean: only
+# retrieve_chunks, search_docs, list_sources, list_documents, get_document.
+_LLM_AVAILABLE = llm_ready(get_draft_home())
+
+_instructions = (
+    "Draft is a document knowledge base with full-text and semantic search. "
+    "Use search_docs for fast keyword lookup. "
+    "Use retrieve_chunks for semantic search — it returns ranked document chunks "
+    "that you should synthesize into your answer. "
+    "Always cite sources by repo and path."
 )
+if _LLM_AVAILABLE:
+    _instructions += (
+        " Use query_docs if you want Draft's LLM to answer for you (non-LLM clients)."
+    )
+
+mcp = FastMCP("draft", instructions=_instructions)
 
 _TRANSPORT_HTTP = "http"
 _TRANSPORT_STDIO = "stdio"
@@ -129,24 +138,27 @@ def list_sources() -> list[dict]:
         raise RuntimeError(str(exc)) from exc
 
 
-@mcp.tool()
-def query_docs(question: str) -> dict:
-    """
-    Answer a question using Draft's RAG pipeline (retrieval + LLM synthesis).
+if _LLM_AVAILABLE:
+    from draft_mcp.tools.ask import query_docs as _query_docs
 
-    Returns {answer, citations}. Requires a built vector index and a configured
-    LLM in .env (DRAFT_LLM_PROVIDER + API key).
+    @mcp.tool()
+    def query_docs(question: str) -> dict:
+        """
+        Answer a question using Draft's RAG pipeline (retrieval + LLM synthesis).
 
-    Note: LLM clients (Claude, GPT, etc.) should use retrieve_chunks instead —
-    it avoids double inference and lets you synthesize within your own context.
-    Use query_docs when you want a complete, self-contained answer from Draft.
-    """
-    try:
-        return _query_docs(question)
-    except DraftMCPError:
-        raise
-    except Exception as exc:
-        raise RuntimeError(str(exc)) from exc
+        Returns {answer, citations}. Requires a built vector index and a configured
+        LLM in .env (DRAFT_LLM_PROVIDER + API key).
+
+        Note: LLM clients (Claude, GPT, etc.) should use retrieve_chunks instead —
+        it avoids double inference and lets you synthesize within your own context.
+        Use query_docs when you want a complete, self-contained answer from Draft.
+        """
+        try:
+            return _query_docs(question)
+        except DraftMCPError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -173,20 +185,21 @@ def document_resource(repo: str, path: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@mcp.prompt()
-def answer_from_docs() -> str:
-    """Workflow prompt for answering questions from Draft documents."""
-    return (
-        "You have access to Draft, a document knowledge base. Follow this workflow:\n\n"
-        "1. Call list_sources() to see what repositories are available.\n"
-        "2. Call retrieve_chunks(query, top_k=5) with your question as the query. "
-        "The returned chunks are semantically ranked — use them as your primary context.\n"
-        "3. If you need the full text of a specific document, call get_document(repo, path).\n"
-        "4. For keyword lookup, use search_docs(query).\n"
-        "5. Synthesize your answer from the retrieved content and always cite sources "
-        "by repo and path.\n\n"
-        "Only call query_docs() if you want Draft's own LLM to answer instead of you."
-    )
+if _LLM_AVAILABLE:
+    @mcp.prompt()
+    def answer_from_docs() -> str:
+        """Workflow prompt for answering questions from Draft documents."""
+        return (
+            "You have access to Draft, a document knowledge base. Follow this workflow:\n\n"
+            "1. Call list_sources() to see what repositories are available.\n"
+            "2. Call retrieve_chunks(query, top_k=5) with your question as the query. "
+            "The returned chunks are semantically ranked — use them as your primary context.\n"
+            "3. If you need the full text of a specific document, call get_document(repo, path).\n"
+            "4. For keyword lookup, use search_docs(query).\n"
+            "5. Synthesize your answer from the retrieved content and always cite sources "
+            "by repo and path.\n\n"
+            "Only call query_docs() if you want Draft's own LLM to answer instead of you."
+        )
 
 
 # ---------------------------------------------------------------------------

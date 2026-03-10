@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "draft.fullname" . }}
+  labels:
+    {{- include "draft.labels" . | nindent 4 }}
+data:
+  # Data root inside the container — must match the PVC mount path in deployment.yaml
+  DRAFT_HOME: {{ .Values.draftHome | quote }}
+
+  # Hugging Face: disable network access, use only pre-downloaded / cached models
+  HF_HUB_OFFLINE: {{ .Values.env.hfHubOffline | quote }}
+
+  # LLM provider and model (non-secret identifiers; API keys go in the Secret)
+  {{- if .Values.env.llmProvider }}
+  DRAFT_LLM_PROVIDER: {{ .Values.env.llmProvider | quote }}
+  {{- end }}
+  {{- if .Values.env.llmModel }}
+  DRAFT_LLM_MODEL: {{ .Values.env.llmModel | quote }}
+  {{- end }}
+
+  # OpenTelemetry
+  OTEL_SERVICE_NAME: {{ .Values.otel.serviceName | quote }}
+  {{- if .Values.otel.otlpEndpoint }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.otel.otlpEndpoint | quote }}
+  {{- end }}
+  {{- if .Values.otel.metricsLog }}
+  DRAFT_OTEL_METRICS_LOG: {{ .Values.otel.metricsLog | quote }}
+  {{- end }}

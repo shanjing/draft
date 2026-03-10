@@ -1,0 +1,162 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "draft.fullname" . }}
+  labels:
+    {{- include "draft.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "draft.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "draft.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          # Override the Dockerfile CMD (which starts the UI on 8058).
+          # This starts the MCP HTTP server instead.
+          command: ["python", "scripts/serve_mcp.py", "-p", {{ .Values.mcp.port | quote }}]
+
+          ports:
+            - name: mcp
+              containerPort: {{ .Values.mcp.port }}
+              protocol: TCP
+
+          # /health is unauthenticated — safe for k8s probes
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: mcp
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: mcp
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          envFrom:
+            - configMapRef:
+                name: {{ include "draft.fullname" . }}
+
+          env:
+            # Secret values injected individually so they are available as named env vars
+            - name: DRAFT_MCP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "draft.secretName" . }}
+                  key: DRAFT_MCP_TOKEN
+                  optional: true
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "draft.secretName" . }}
+                  key: ANTHROPIC_API_KEY
+                  optional: true
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "draft.secretName" . }}
+                  key: GEMINI_API_KEY
+                  optional: true
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "draft.secretName" . }}
+                  key: OPENAI_API_KEY
+                  optional: true
+
+          volumeMounts:
+            - name: draft-data
+              mountPath: {{ .Values.draftHome }}
+            {{- if .Values.hfCache.hostPath }}
+            # Mount host model cache at DRAFT_HOME/.cache/huggingface.
+            # This shadows the PVC subdirectory so pre-downloaded models on the host
+            # are used directly without copying or re-downloading.
+            # The app sets HF_HOME to this path at startup (lib/paths.py:get_hf_cache_root).
+            - name: hf-model-cache
+              mountPath: {{ printf "%s/.cache/huggingface" .Values.draftHome }}
+            {{- end }}
+            {{- if .Values.sourcesConfig }}
+            # Mount sources.yaml from ConfigMap via subPath so only this file is overlaid
+            # on the PVC — the rest of DRAFT_HOME remains writable (vector store, HF cache).
+            - name: sources-config
+              mountPath: {{ printf "%s/sources.yaml" .Values.draftHome }}
+              subPath: sources.yaml
+              readOnly: true
+            {{- end }}
+            {{- range .Values.docSources }}
+            # Host-path mount for document source: {{ .name }}
+            - name: docsrc-{{ .name | replace "_" "-" | lower }}
+              mountPath: {{ .mountPath }}
+              readOnly: true
+            {{- end }}
+
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+      volumes:
+        - name: draft-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "draft.pvcName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.hfCache.hostPath }}
+        - name: hf-model-cache
+          hostPath:
+            path: {{ .Values.hfCache.hostPath }}
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.sourcesConfig }}
+        - name: sources-config
+          configMap:
+            name: {{ include "draft.fullname" . }}-sources
+        {{- end }}
+        {{- range .Values.docSources }}
+        - name: docsrc-{{ .name | replace "_" "-" | lower }}
+          hostPath:
+            path: {{ .hostPath }}
+            type: Directory
+        {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

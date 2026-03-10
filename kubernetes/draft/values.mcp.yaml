@@ -1,0 +1,29 @@
+# MCP server values overlay — container-side source configuration.
+#
+# This file defines the pod's view: what repos exist and which container
+# paths they live at. Safe to commit — contains no host paths.
+#
+# Pair with kubernetes/draft/values.local.yaml (gitignored) which defines the host's view:
+# the real hostPath for each docSource entry.
+#
+# Deploy (run from repo root):
+#   helm upgrade draft ./kubernetes/draft -n draft \
+#     -f kubernetes/draft/values.mcp.yaml \
+#     -f kubernetes/draft/values.local.yaml
+#
+# Each file contributes different, non-overlapping config:
+#   values.mcp.yaml  → sourcesConfig  (container paths, committed)
+#   kubernetes/draft/values.local.yaml → docSources    (host paths, gitignored)
+
+# sources.yaml content injected into the pod at DRAFT_HOME/sources.yaml.
+# Each source path must match the mountPath in the corresponding docSources
+# entry in kubernetes/draft/values.local.yaml.
+# This is read-only: pull.py / add-source are not supported in-pod.
+sourcesConfig: |
+  repos:
+    runbooks:
+      source: /mnt/docs/runbooks
+    engineering:
+      source: /mnt/docs/engineering
+    others:
+      source: /mnt/docs/others
