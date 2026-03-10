@@ -22,6 +22,52 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.indexOnColdStart }}
+      initContainers:
+        - name: index-builder
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Check if the vector store already exists. Build only on cold start (empty PVC).
+          # On normal restarts the ls check exits in < 1 second, adding no meaningful delay.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ -z "$(ls -A {{ .Values.draftHome }}/.vector_store 2>/dev/null)" ]; then
+                echo "Vector store empty — building index on cold start..."
+                python scripts/index_for_ai.py --profile quick
+              else
+                echo "Vector store present — skipping index build."
+              fi
+          envFrom:
+            - configMapRef:
+                name: {{ include "draft.fullname" . }}
+          env:
+            - name: DRAFT_MCP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "draft.secretName" . }}
+                  key: DRAFT_MCP_TOKEN
+                  optional: true
+          volumeMounts:
+            - name: draft-data
+              mountPath: {{ .Values.draftHome }}
+            {{- if .Values.hfCache.hostPath }}
+            - name: hf-model-cache
+              mountPath: {{ printf "%s/.cache/huggingface" .Values.draftHome }}
+            {{- end }}
+            {{- if .Values.sourcesConfig }}
+            - name: sources-config
+              mountPath: {{ printf "%s/sources.yaml" .Values.draftHome }}
+              subPath: sources.yaml
+              readOnly: true
+            {{- end }}
+            {{- range .Values.docSources }}
+            - name: docsrc-{{ .name | replace "_" "-" | lower }}
+              mountPath: {{ .mountPath }}
+              readOnly: true
+            {{- end }}
+      {{- end }}
       containers:
         - name: mcp
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
