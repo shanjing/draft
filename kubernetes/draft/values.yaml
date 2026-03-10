@@ -235,6 +235,21 @@ tolerations: []
 affinity: {}
 
 # Override the chart name used in resource names (partial override).
+# Run an init container that automatically builds the RAG index on cold start.
+# The init container runs before the MCP server starts. It checks whether the
+# vector store already exists and only builds if the directory is empty.
+#
+# Cold start (new PVC after helm uninstall / cluster recreation):
+#   Init container runs index build (~2–5 min for typical doc set). Pod starts
+#   with index already ready — no manual kubectl exec required.
+#
+# Normal restart (pod crash, rollout restart, node rescheduling):
+#   Init container checks the vector store (< 1 second), finds it non-empty,
+#   and exits immediately. No delay to pod startup.
+#
+# Set to false if you manage indexing externally or want to skip automatic builds.
+indexOnColdStart: true
+
 nameOverride: ""
 # Override the full name used in resource names (complete override).
 fullnameOverride: ""
