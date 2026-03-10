@@ -1,8 +1,41 @@
+# Version control
 .git
+
+# Python virtual environment (never copy into image)
 .venv
+
+# Python bytecode
 __pycache__
 *.pyc
+*.pyo
+
+# IDE / editor
 .cursor
+.vscode
+
+# Secrets (never bake into image)
 .env
+.env.*
+
+# Docker artifacts
 Dockerfile
 .dockerignore
+
+# Tests (dev-only, not needed in production image)
+tests/
+
+# Runtime data / indexes (mounted as volumes at runtime)
+.vector_store/
+.search_index/
+.draft/
+
+# HuggingFace model cache (mounted from host or PVC at runtime)
+.cache/
+
+# Scratch / temporary
+*.tar
+*.log
+nohup.out
+1
+2
+tasks/

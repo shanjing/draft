@@ -28,6 +28,9 @@ vault
 # Cloned GitHub sources (setup.sh)
 .sources/
 
+# Helm local overrides (real host paths, not committed)
+values.local.yaml
+
 # Editor
 *.swp
 *~

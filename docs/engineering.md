@@ -439,39 +439,43 @@ Both search and ingest use the same roots (vault, .doc_sources, .clones). **Excl
                              ▼
                     ┌─────────────────┐
                     │  ~/.draft/.doc_ │
-                    │  sources/<repo>  │
-                    │  *.md files     │
+                    │  sources/<repo> │
+                    │  vault/ *.md    │
                     └────────┬────────┘
                              │
-         ┌───────────────────┼───────────────────┐
-         │                   │                   │
-         ▼                   ▼                   ▼
-  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-  │ Whoosh       │   │ Chunking +   │   │ FastAPI UI   │
-  │ (existing)   │   │ Embeddings   │   │ (existing)   │
-  └──────────────┘   └──────┬───────┘   └──────┬───────┘
-                            │                  │
-                            ▼                  │
-                     ┌──────────────┐          │
-                     │ Vector store │          │
-                     │ (Chroma/     │          │
-                     │  FAISS)      │          │
-                     └──────┬───────┘          │
-                            │                  │
-                            ▼                  ▼
-                     ┌──────────────────────────────┐
-                     │  lib/ai_engine.py            │
-                     │  Semantic search → LLM       │
-                     │  (Claude API or local Qwen)  │
-                     └──────────────┬───────────────┘
-                                    │
-                                    ▼
-                     ┌──────────────────────────────┐
-                     │  Draft Chat UI               │
-                     │  Ask question → streamed     │
-                     │  answer + citation links     │
-                     └──────────────────────────────┘
+         ┌───────────────────┼───────────────────┬───────────────────┐
+         │                   │                   │                   │
+         ▼                   ▼                   ▼                   ▼
+  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
+  │ Whoosh       │   │ Chunking +   │   │ FastAPI UI   │   │ MCP Server       │
+  │ .search_     │   │ Embeddings   │   │ (port 8058)  │   │ (draft_mcp)      │
+  │ index/       │   │              │   │              │   │ port 8059 / stdio│
+  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘   └────────┬─────────┘
+         │                  │                  │                    │
+         │                  ▼                  │                    │
+         │           ┌──────────────┐          │                    │
+         │           │ Vector store │          │                    │
+         │           │ (Chroma)     │          │                    │
+         │           └──────┬───────┘          │                    │
+         │                  │                  │                    │
+         │                  ▼                  ▼                    ▼ 
+         │           ┌──────────────────────────────────────────────────────┐
+         │           │  lib/ai_engine.py  ·  ui/search_index.py             │
+         │           │  retrieve(), ask_stream()  ·  search()               │
+         └───────────┤  (shared by UI and MCP; MCP imports lib/ directly)   │
+                     └──────────────┬────────────────────-─┬─-──────────────┘
+                                    │                      │
+                                    ▼                      ▼
+                     ┌──────────────────────────────┐  ┌─────────────────────────┐
+                     │  Draft UI                    │  │  MCP clients            │
+                     │  Ask (AI) → streamed answer  │  │  Claude Desktop, SRE    │
+                     │  + citation links            │  │  agents, curl (tools/   │
+                     └──────────────────────────────┘  │  call retrieve_chunks,  │
+                                                       │  search_docs, etc.)     │
+                                                       └─────────────────────────┘
 ```
+
+**MCP server:** Separate process (`scripts/serve_mcp.py`). Uses the same **lib/** and **ui/search_index** as the UI — no HTTP call to the UI. Streamable HTTP (Bearer token, port 8059) or stdio (Claude Desktop). Tools: `search_docs`, `retrieve_chunks`, `query_docs`, `get_document`, `list_documents`, `list_sources`. See [MCP design](MCP_design.md) and [MCP operations](MCP_operations.md).
 
 ### 6.2 Phase summary
 
@@ -512,6 +516,7 @@ ollama run qwen3:8b
 2. **Content hash and file registry** — Compute SHA-256 per file at index time; store in Chroma chunk metadata and in `.draft/file_registry.json` for re-link. Not yet done.
 3. **Re-link logic** — On startup or “Reconnect storage,” resolve paths from manifest, scan files, match by hash to registry; update paths without re-embedding. Not yet done.
 4. **Browser drop** — Plugin sends page URL + content; backend creates source type `url`, stores in .doc_sources; manifest fields: origin_url, drop_timestamp, content_type. Not yet implemented.
+5. **Cloud doc roots (S3, etc.)** — The current design is ready for cloud doc roots with almost no code change. Indexing, search, and MCP tools all consume content via `get_effective_repo_root()` and walking the resolved path. Adding S3 (or similar) would require either: (a) a new source type (e.g. `s3`) with a sync step that downloads objects into a path under DRAFT_HOME (e.g. `.doc_sources/<name>`), or (b) an external sync (e.g. rclone, CronJob) that populates a mounted path already listed in `sources.yaml` as a local dir. The rest of the pipeline (ingest, Whoosh, Chroma, MCP tools) would work unchanged.
 
 ### 7.2 Implemented
 

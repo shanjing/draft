@@ -26,10 +26,11 @@ See [Using setup.sh](#using-setupsh) below for what the script does.
 **Daemon (recommended):** server in the background, app opens in your browser.
 
 ```bash
-./draft.sh              # start on default port 8058
-./draft.sh -p 8059      # start on port 8059
-./draft.sh -s           # stop
-./draft.sh -r           # restart
+./draft.sh ui start             # start on default port 8058
+./draft.sh ui start -p 9000    # start on a custom port
+./draft.sh ui stop              # stop
+./draft.sh ui restart           # restart (force-kills stale process)
+./draft.sh status               # show state of both UI and MCP server
 ```
 
 Logs: `~/.draft/.draft-ui.log` (or `$DRAFT_HOME/.draft-ui.log`).
@@ -95,7 +96,7 @@ docker run -p 8058:8058 -v ~/.draft:/root/.draft draft-ui
 
 To use your LLM config (Ollama or API keys), mount **.env**. If Ollama runs on the **host**, set **OLLAMA_HOST** (e.g. `http://host.docker.internal:11434`) so the container can reach it.
 
-**Easiest:** run **./setup.sh** and choose **8) Run Draft in a Docker container**. Full details: [Container orchestration](docs/container_orchestration_guide.md).
+**Easiest:** run **./setup.sh** and choose **8) Run Draft in a Docker container**. Full details: [Container orchestration](docs/container_orchestration.md).
 
 ### Full-text and semantic search
 
@@ -140,6 +141,19 @@ Two transports:
 
 - **Streamable HTTP** — for remote clients, Docker, SRE agents. Bearer token auth (**DRAFT_MCP_TOKEN** in `.env`). `POST http://localhost:8059/mcp` with session from `initialize`.
 - **stdio** — for Claude Desktop and local tools. No auth.
+
+**Local daemon (recommended):**
+
+```bash
+./draft.sh mcp start            # start HTTP daemon (port 8059, background)
+./draft.sh mcp stop             # stop
+./draft.sh mcp restart          # restart (force-kills stale process)
+./draft.sh mcp start --stdio    # stdio transport (foreground, for Claude Desktop)
+./draft.sh mcp logs             # tail the MCP log
+./draft.sh status               # show state of both UI and MCP server
+```
+
+**Direct (foreground / scripting):**
 
 ```bash
 python scripts/serve_mcp.py              # HTTP on 8059
@@ -186,7 +200,7 @@ Re-run **./setup.sh** anytime to add sources or change the LLM. See **docs/RAG_o
 | [Engineering](docs/engineering.md) | Design principles, storage, metadata, vault, intelligence layer, implementation order |
 | [RAG design](docs/RAG_design.md) | RAG goals, chunking, two-stage retrieval (bi-encoder + cross-encoder), model choices |
 | [RAG operations](docs/RAG_operations.md) | Changing embed/encoder models, tests (ask.py, test_pipeline, CI/CD) |
-| [Container orchestration](docs/container_orchestration_guide.md) | Docker and Kubernetes deployment, example manifests in `deployment/` |
+| [Container orchestration](docs/container_orchestration.md) | Docker and Kubernetes deployment, example manifests in `deployment/` |
 | [MCP design](docs/MCP_design.md) | draft_mcp package, tools, Streamable HTTP + stdio, Bearer auth, resources, prompts |
 | [MCP operations](docs/MCP_operations.md) | Runbook: run MCP server, token, config, testing, OTel metrics log, troubleshooting |
 | [Observability design](docs/observability_design.md) | OTel metrics and traces (RAG + MCP), GenAI semconv, console vs OTLP |
