@@ -1,0 +1,13 @@
+{{- if .Values.sourcesConfig }}
+# Separate ConfigMap for sources.yaml so it can be mounted as a file via subPath
+# without conflicting with the envFrom ConfigMap (env var names cannot contain dots).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "draft.fullname" . }}-sources
+  labels:
+    {{- include "draft.labels" . | nindent 4 }}
+data:
+  sources.yaml: |
+    {{- .Values.sourcesConfig | nindent 4 }}
+{{- end }}

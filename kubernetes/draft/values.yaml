@@ -1,0 +1,240 @@
+# Default values for the Draft MCP server Helm chart.
+# These are production/cloud-safe defaults. Override with --set or a custom values file.
+#
+# Deployment pattern (local Kubernetes — Mac Mini / kind / on-prem):
+#   helm upgrade --install draft ./kubernetes/draft -n draft --create-namespace \
+#     -f kubernetes/draft/values.mcp.yaml \
+#     -f kubernetes/draft/values.local.yaml
+#
+# Deployment pattern (cloud — GKE / EKS / AKS):
+#   helm upgrade --install draft ./kubernetes/draft -n draft --create-namespace \
+#     --set image.repository=<registry>/draft \
+#     --set image.tag=<sha-or-semver> \
+#     --set mcp.existingSecret=draft-mcp-secret \
+#     -f kubernetes/draft/values.mcp.yaml
+#
+# File roles:
+#   values.yaml          — defaults (this file); do not edit per-deployment
+#   values.mcp.yaml      — sourcesConfig (container-side source paths); committed, safe to share
+#   values.local.yaml    — local cluster overrides + host paths; GITIGNORED, never committed
+
+# Number of MCP server pod replicas.
+# Draft uses a single PVC (ReadWriteOnce) — keep this at 1 unless your storage class
+# supports ReadWriteMany and you have a multi-replica indexing strategy.
+replicaCount: 1
+
+image:
+  # Container image repository. For local clusters: the image name as loaded with
+  # `kind load docker-image draft:latest`. For cloud: full registry path,
+  # e.g. gcr.io/my-project/draft or 123456789.dkr.ecr.us-east-1.amazonaws.com/draft.
+  repository: draft
+  # Image tag. Use a specific SHA or semver tag in production to pin the version.
+  # "latest" is acceptable for local development where you control the build.
+  tag: latest
+  # Image pull policy.
+  # IfNotPresent — use cached image if present, pull otherwise. Safe cloud default.
+  # Always       — always pull; use with a mutable tag like "latest" in CI/CD.
+  # Never        — never pull; image must exist on the node (kind load / manual import).
+  #                Required for local clusters where no registry is available.
+  #                Override in values.local.yaml for local clusters.
+  pullPolicy: IfNotPresent
+
+# MCP server configuration (HTTP transport, port 8059)
+mcp:
+  # Port the MCP HTTP server listens on inside the container.
+  # Must match service.port and the port your MCP client is configured to connect to.
+  port: 8059
+  # Bearer token for MCP HTTP auth.
+  # If empty, the app auto-generates a random token at startup and prints it to stderr.
+  # Set a stable value so the token survives pod restarts and your MCP client config
+  # doesn't need to change.
+  # Generate with: openssl rand -base64 32
+  # Example: --set mcp.token="$(openssl rand -base64 32)"
+  token: ""
+  # Use an existing Kubernetes Secret for the MCP token instead of creating one
+  # from mcp.token. Useful for GitOps or when secrets are managed externally
+  # (AWS Secrets Manager, GCP Secret Manager, Vault).
+  # The Secret must exist in the same namespace and have a key named DRAFT_MCP_TOKEN.
+  # When set, mcp.token is ignored.
+  existingSecret: ""
+
+# DRAFT_HOME path inside the container.
+# All app state lives here: sources.yaml, .vector_store/, .search_index/, .cache/.
+# Must match persistence.mountPath in the PVC configuration (set by the chart).
+# Change only if you have a specific reason to use a different path.
+draftHome: /data/draft
+
+# Persistence for DRAFT_HOME (sources, pulled docs, vector store, search index, HF cache).
+# The PVC is mounted at draftHome inside the container.
+persistence:
+  # Set to false to run without persistent storage (data lost on pod restart).
+  # Only for quick testing — not recommended for any real use.
+  enabled: true
+  # StorageClass for the PVC. Empty string = use the cluster's default StorageClass.
+  # Local clusters (kind): uses the default local-path provisioner.
+  # Cloud: use a class appropriate for ReadWriteOnce (e.g. standard, gp2, pd-ssd).
+  storageClass: ""
+  # PVC size. The vector store and HF model cache grow over time.
+  # 2Gi covers typical use (a few doc sources, sentence-transformers embeddings).
+  # Increase to 5–10Gi if you have many sources or run larger embedding models.
+  size: 2Gi
+  # Access mode. ReadWriteOnce is correct for a single-replica deployment.
+  # Do not change unless you switch to a multi-replica setup with shared storage.
+  accessMode: ReadWriteOnce
+
+# sources.yaml content to inject into the pod.
+# When set, a ConfigMap is created and mounted at DRAFT_HOME/sources.yaml via subPath,
+# overriding any file on the PVC. Source paths must use the container-side mountPath
+# values from docSources below.
+#
+# Read-only management only: pull.py / add-source are not supported in-pod.
+# This enables RAG index rebuilds over pre-existing mounted documents.
+#
+# In practice, set this via values.mcp.yaml (committed) rather than here.
+# Example:
+#   sourcesConfig: |
+#     repos:
+#       runbooks:
+#         source: /mnt/docs/runbooks
+#       specs:
+#         source: /mnt/docs/specs
+sourcesConfig: ""
+
+# Host-path mounts for document source directories.
+# Each entry creates a hostPath volume + volumeMount (read-only) in the pod,
+# making a directory on the Kubernetes node visible inside the container.
+#
+# Requirements:
+#   - The hostPath directory must exist on every node that may schedule the pod.
+#   - mountPath must exactly match the source paths used in sourcesConfig above.
+#   - Helm arrays do NOT merge across -f files: a later file fully replaces this list.
+#     Always define the complete docSources list in a single file (values.local.yaml).
+#
+# Cloud note: for cloud clusters, use a CSI driver (e.g. Mountpoint for Amazon S3)
+# instead of hostPath. The mountPath and sourcesConfig entries stay identical.
+#
+# Set in values.local.yaml rather than here. Example:
+#   docSources:
+#     - name: runbooks          # Kubernetes volume name (lowercase, no underscores)
+#       hostPath: /Volumes/External/docs/runbooks   # path on the HOST node
+#       mountPath: /mnt/docs/runbooks               # path INSIDE the container
+#     - name: specs
+#       hostPath: /Volumes/External/docs/specs
+#       mountPath: /mnt/docs/specs
+docSources: []
+
+# HuggingFace model cache configuration.
+# Draft uses sentence-transformers for embeddings and a cross-encoder for reranking.
+# Models are stored at DRAFT_HOME/.cache/huggingface (HF_HOME env var).
+# The PVC persists this path across pod restarts, so models download once then cache.
+hfCache:
+  # Path on the HOST node to mount as the HuggingFace model cache.
+  # When set, this directory is bind-mounted over DRAFT_HOME/.cache/huggingface,
+  # making pre-downloaded models available immediately without any network access.
+  #
+  # Cloud default: leave empty — models download from HuggingFace Hub on first use
+  # and persist on the PVC. Set env.hfHubOffline to "0" in this case.
+  #
+  # Local override: set in kubernetes/draft/values.local.yaml.
+  # Example: hostPath: /Users/you/ai_models
+  hostPath: ""
+
+# Non-secret application environment variables.
+env:
+  # HuggingFace Hub online/offline mode.
+  # "0" = online: download missing models at runtime (required if hfCache.hostPath is empty).
+  # "1" = offline/strict: block all HF Hub network access; fails if a model is not cached.
+  #        Use "1" when all models are pre-cached via hfCache.hostPath or already on the PVC.
+  hfHubOffline: "0"
+  # LLM provider for AI-assisted Q&A (RAG answers).
+  # Supported: claude | gemini | openai | ollama
+  # Empty = AI Q&A disabled; the MCP tool still returns search results without an LLM answer.
+  llmProvider: ""
+  # LLM model name. Must match the provider above.
+  # Examples: claude-sonnet-4-6, gemini-2.5-flash, gpt-4o, qwen3:8b (ollama)
+  # Empty = use provider default.
+  llmModel: ""
+
+# Secret API keys (stored in a Kubernetes Secret, never in plain ConfigMaps).
+# Set the key for whichever LLM provider you configured in env.llmProvider.
+# Prefer using --set secrets.<key>=... at deploy time rather than storing keys in files.
+secrets:
+  # MCP server bearer token. Alternative to mcp.token — set one or the other, not both.
+  # mcp.token / mcp.existingSecret take precedence over this field.
+  mcpToken: ""
+  # Anthropic API key. Required when env.llmProvider=claude.
+  anthropicApiKey: ""
+  # Google AI API key. Required when env.llmProvider=gemini.
+  geminiApiKey: ""
+  # OpenAI API key. Required when env.llmProvider=openai.
+  openaiApiKey: ""
+
+# OpenTelemetry configuration.
+# Draft emits traces and metrics via OpenTelemetry for observability.
+otel:
+  # Service name tag applied to all traces and metrics (OTEL_SERVICE_NAME).
+  # Change if you run multiple Draft instances and need to distinguish them.
+  serviceName: "draft-mcp"
+  # OTLP HTTP collector endpoint for traces and metrics.
+  # When set, Draft exports to this endpoint using OTLP HTTP exporters.
+  # Example: http://otel-collector.monitoring.svc.cluster.local:4318
+  # Leave empty to use console exporters instead (output written to pod logs or a file).
+  otlpEndpoint: ""
+  # Where to write OTel metrics when using the console exporter (otlpEndpoint is empty).
+  # "stdout" = write to pod stdout (recommended for Kubernetes; picked up by log aggregators).
+  # ""       = write to DRAFT_HOME/otel_metrics.log on the PVC.
+  # A file path = write to that path (must be writable inside the container).
+  metricsLog: "stdout"
+
+# Kubernetes Service for the MCP server.
+service:
+  # Service type. ClusterIP exposes the service only within the cluster.
+  # Use NodePort or LoadBalancer if you need external access without a proxy/ingress.
+  # For MCP clients running on the same host (kubectl port-forward or host network),
+  # ClusterIP + port-forward is the standard approach.
+  type: ClusterIP
+  # Port the Service listens on. Must match mcp.port.
+  port: 8059
+
+# Resource requests and limits for the MCP server container.
+# The sentence-transformers embedding model and cross-encoder reranker require memory.
+# Recommended minimums when HF models run inside the pod:
+#   memory request >= 1Gi (embedding model alone uses ~500 MB)
+#   memory limit   >= 2Gi (reranker + embedding + app overhead)
+# Leave empty to use cluster defaults (not recommended for production).
+resources: {}
+# Example:
+#   requests:
+#     cpu: 250m
+#     memory: 1Gi
+#   limits:
+#     cpu: 1000m
+#     memory: 2Gi
+
+# Annotations to add to the pod (not the Deployment).
+# Useful for Prometheus scraping, Vault agent injection, Datadog APM, etc.
+# Example: prometheus.io/scrape: "true"
+podAnnotations: {}
+
+# Pod-level security context (applied to all containers in the pod).
+# Controls fsGroup, runAsUser, sysctls, etc.
+podSecurityContext: {}
+
+# Container-level security context for the MCP server container.
+# Controls readOnlyRootFilesystem, runAsNonRoot, capabilities, etc.
+securityContext: {}
+
+# Node selector for pod scheduling. Constrain the pod to nodes with specific labels.
+# Example: kubernetes.io/arch: amd64
+nodeSelector: {}
+
+# Tolerations for pod scheduling. Allow the pod to schedule on tainted nodes.
+tolerations: []
+
+# Affinity rules for pod scheduling (node affinity, pod affinity/anti-affinity).
+affinity: {}
+
+# Override the chart name used in resource names (partial override).
+nameOverride: ""
+# Override the full name used in resource names (complete override).
+fullnameOverride: ""

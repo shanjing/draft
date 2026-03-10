@@ -1,0 +1,11 @@
+---
+description: Use Click for CLI parsing in Python scripts (serve_mcp.py, serve.py, pull.py, ask.py, etc.)
+alwaysApply: true
+---
+
+# Scripts CLI convention
+
+- **Use Click** for argument and option parsing in `scripts/*.py` (and other CLI entrypoints).
+- Prefer `@click.command()` with `@click.option()` / `@click.argument()`; use `is_flag=True` for flags like `--stdio`, `--log-json`.
+- Keep behavior and help text consistent with existing scripts (e.g. `scripts/serve.py`, `scripts/pull.py`, `scripts/serve_mcp.py`, `scripts/ask.py`).
+- Do not add new scripts using `argparse`; convert any argparse-based CLIs to Click when touching them.

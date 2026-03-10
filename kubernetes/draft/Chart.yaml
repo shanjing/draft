@@ -1,0 +1,12 @@
+apiVersion: v2
+name: draft
+description: Draft MCP server – document knowledge base with full-text and semantic search
+type: application
+version: 0.1.0
+appVersion: "1.0"
+keywords:
+  - mcp
+  - knowledge-base
+  - rag
+  - documents
+home: https://github.com/shanjing/draft

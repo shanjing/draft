@@ -441,16 +441,46 @@ helm upgrade draft ./kubernetes/draft -n draft \
   --set secrets.anthropicApiKey="sk-ant-..."
 ```
 
-#### Rebuilding the RAG index
+#### Rebuilding the RAG index (Kubernetes hosted MCP)
+Note: the discussion here is for use Draft as an MCP server hosted in Kubernetes. This is different than using Draft as PKB.
 
-Run after any new `.md` files are added to a mounted directory, or after changing the embed model.
+The index lives on the PVC and survives pod restarts, image rebuilds, and `helm upgrade`. It only
+needs rebuilding when **content** changes, not when code changes:
+
+| Event | Rebuild needed? |
+|-------|----------------|
+| New or updated `.md` files in a doc source directory | ✅ Yes |
+| Embedding model changed (code or config) | ✅ Yes |
+| Cold start — new PVC after `helm uninstall` | ✅ Yes |
+| `docker build` + image load + `kubectl rollout restart` | ❌ No |
+| `helm upgrade` (config change only) | ❌ No |
+| Pod crash / container restart | ❌ No |
+
+**Cold start is handled automatically.** The chart deploys an init container (`index-builder`) that
+runs before the MCP server starts. It checks whether the vector store already exists:
+- **Empty PVC** (first deploy or after `helm uninstall`): builds the index automatically — no manual
+  `kubectl exec` needed. The MCP server starts with `index_ready: true`.
+- **Non-empty PVC** (normal restart): exits in < 1 second with no delay.
+
+To disable automatic cold-start builds (e.g. you manage indexing externally):
+```bash
+helm upgrade draft ./kubernetes/draft -n draft \
+  --set indexOnColdStart=false \
+  -f kubernetes/draft/values.mcp.yaml \
+  -f kubernetes/draft/values.local.yaml
+```
+
+Monitor the cold-start build:
+```bash
+kubectl logs -n draft -l app.kubernetes.io/name=draft -c index-builder -f
+```
 
 ```bash
-# Quick rebuild (daily / after new docs added)
+# Quick rebuild — after new or updated docs (minutes)
 kubectl -n draft exec deployment/draft -- \
   python scripts/index_for_ai.py --profile quick
 
-# Deep rebuild (weekly / after embed model change)
+# Deep rebuild — after embedding model change (slower, re-embeds everything)
 kubectl -n draft exec deployment/draft -- \
   python scripts/index_for_ai.py --profile deep
 
