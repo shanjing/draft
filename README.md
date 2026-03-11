@@ -1,6 +1,6 @@
 # Draft
 
-Draft pulls scattered files from your local disks and GitHub projects into one place — a unified knowledge base with full-text and semantic search, and an optional LLM that answers questions from your content. It works fully offline (private Inference stack or ollama for desktop)) or with a cloud provider, and scales from a personal note hub to a team knowledge base or a high-performance lightweight production MCP server.
+Draft pulls scattered files from your local disks and GitHub projects into one place — a unified knowledge base with full-text and semantic searches with LLM that answers questions from your content. It works fully offline with your local LLM or with a cloud provider. Draft is also a high-performance lightweight production MCP server that works with Claude Desktop, Claude Code and other agents.
 
 To get started:
 ```bash
