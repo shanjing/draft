@@ -1,6 +1,6 @@
 ## 1. Setup document sources, embedding model, encoding/rerankign model, LLM models
 
-This is a quick walk through on how to set the embedding models using setup.sh
+This is a quick walkthrough on how to set the embedding models using setup.sh
 
 - In setup.sh see the discrencies between "Embeded: model" and "RAG index: model". This will require to reindex the vector DB in order to query the RAG. 
 Pick option 5 to reindex the vector DB.
@@ -11,7 +11,7 @@ Pick option 5 to reindex the vector DB.
 
 ## 2. Semantic search with ask.py
 
-This is a walk through on how to make semantic/LLM querys using CLI ask.py (--show-prompt option) with the debugging option to exam the prompts (contains the RAG chunks) sent to the LLM.
+This is a walkthrough on how to make semantic/LLM querys using CLI ask.py (--show-prompt option) with the debugging option to exam the prompts (contains the RAG chunks) sent to the LLM.
 
 - ask.py asks the following question
 ```bash
