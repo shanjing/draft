@@ -19,10 +19,13 @@ source .venv/bin/activate
 python scripts/ask.py --show-prompt -q "Are routes attached to the Gateway and pointing to the correct predictor Services?"
 ```
 - ask.py retrieved chunks from the vector DB and sent the prompt with RAG chunks to the LLM
+  
 ![ask.py prompt with RAG chunks](docs/images/DraftAsk_Question1.png)
+
 ![ask.py prompt with RAG chunks](docs/images/DraftAsk_Question2.png)
 
 - LLM responses with reranking scores for reference/debugging of RAG.
+  
 ![LLM responses](docs/images/DraftAsk_Answer.png)
 
 
