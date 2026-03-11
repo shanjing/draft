@@ -52,7 +52,7 @@ def query_docs(question: str, transport: str = "unknown") -> dict:
                 # Surface LLM/retrieval errors as a clean MCP error
                 if "collection" in payload.lower() or "index" in payload.lower():
                     raise IndexNotReady(
-                        "Vector store not ready. Run 'python scripts/index_for_ai.py --profile quick' "
+                        "Vector store not ready. Run 'python scripts/index_for_ai.py' (requires DRAFT_EMBED_MODEL in .env)"
                         "or use the UI Quick rebuild."
                     )
                 raise RuntimeError(f"query_docs failed: {payload}")

@@ -16,6 +16,7 @@ import contextlib
 import io
 import logging
 import os
+import time
 import warnings
 from pathlib import Path
 
@@ -52,27 +53,12 @@ EXCLUDE_DIRS = (
 
 COLLECTION_NAME = "draft_docs"
 
-# nomic-embed-text-v1.5 requires trust_remote_code=True. Alternative: "sentence-transformers/all-MiniLM-L6-v2" (no trust_remote_code).
-EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
-TRUST_REMOTE_CODE = True
-# quick/deep apply to both .md and .py chunking (code is included in the index).
-INDEX_PROFILES = {
-    "quick": {
-        "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
-        "trust_remote_code": False,
-        "chunk_max_chars": 1600,
-        "chunk_overlap_paras": 0,
-        "batch_size": 192,
-        "embed_batch_size": 48,
-    },
-    "deep": {
-        "embed_model": EMBED_MODEL,
-        "trust_remote_code": TRUST_REMOTE_CODE,
-        "chunk_max_chars": 2400,
-        "chunk_overlap_paras": 1,
-        "batch_size": 128,
-        "embed_batch_size": 32,
-    },
+# Default chunk/batch when building from DRAFT_EMBED_MODEL only (no quick/deep profiles).
+INDEX_DEFAULTS = {
+    "chunk_max_chars": 1600,
+    "chunk_overlap_paras": 0,
+    "batch_size": 192,
+    "embed_batch_size": 48,
 }
 
 
@@ -229,11 +215,11 @@ def _reload_env_from_file(draft_root: Path) -> None:
         pass
 
 
-def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick") -> int:
+def build_index(draft_root: Path, verbose: bool = False) -> int:
     """
     Rebuild the Chroma vector store from vault and each repo's effective root:
     .md (by section/paragraph) and .py (by ast def/class). Returns the number of chunks indexed.
-    Re-loads .env at start so embed/encoder changes take effect without restart (Docker/K8s).
+    Uses DRAFT_EMBED_MODEL from .env (required). Re-loads .env at start so changes take effect without restart.
     """
     _reload_env_from_file(draft_root)
     os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
@@ -266,16 +252,16 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     transformers_logging.set_verbosity_error()
     hf_logging.set_verbosity_error()
 
-    mode = (profile or "quick").strip().lower()
-    if mode not in INDEX_PROFILES:
-        raise ValueError(f"Unknown index profile: {profile}. Use quick or deep.")
-    cfg = dict(INDEX_PROFILES[mode])
-    # Env override for embedding model and provider (set by setup.sh step 2). .env is source of truth.
+    # Embedding model from .env only (no quick/deep profiles).
     env_embed = os.environ.get("DRAFT_EMBED_MODEL", "").strip().strip("'\"")
+    if not env_embed:
+        raise ValueError(
+            "DRAFT_EMBED_MODEL is not set. Set it in .env (e.g. DRAFT_EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2) or run setup.sh step 2."
+        )
     env_embed_provider = (os.environ.get("DRAFT_EMBED_PROVIDER", "") or "").strip().lower()
-    if env_embed:
-        cfg["embed_model"] = env_embed
-        cfg["trust_remote_code"] = "nomic" in env_embed.lower() or "qwen" in env_embed.lower()
+    cfg = dict(INDEX_DEFAULTS)
+    cfg["embed_model"] = env_embed
+    cfg["trust_remote_code"] = "nomic" in env_embed.lower() or "qwen" in env_embed.lower()
     use_ollama_embed = env_embed_provider == "ollama"
     use_gemini_embed = env_embed_provider == "gemini"
 
@@ -312,7 +298,7 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
         COLLECTION_NAME,
         metadata={
             "description": "Draft docs for RAG",
-            "profile": mode,
+            "profile": "env",
             "embed_model": str(cfg["embed_model"]),
             "embed_provider": embed_provider,
             "trust_remote_code": bool(cfg["trust_remote_code"]),
@@ -322,12 +308,12 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     )
 
     if verbose:
-        log.info(f"Embedding {len(chunks)} chunks with {cfg['embed_model']} ({embed_provider}, {mode})...")
+        log.info(f"Embedding {len(chunks)} chunks with {cfg['embed_model']} ({embed_provider})...")
     BATCH_SIZE = int(cfg["batch_size"])
     EMBED_BATCH_SIZE = int(cfg["embed_batch_size"])
     starts = range(0, len(chunks), BATCH_SIZE)
     pbar = None
-    if tqdm is not None:
+    if tqdm is not None and verbose:
         pbar = tqdm(total=len(chunks), desc="Build RAG/vector index", unit="chunk", leave=True)
 
     if use_gemini_embed:
@@ -341,6 +327,8 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
             batch = chunks[start:end]
             texts = [c.text for c in batch]
             embeddings = gemini_embed(texts, gemini_model, gemini_api_key)
+            # As of 3/11/2026, Gemini embedding throttles requests at 3K tokens per minute (SJ)
+            time.sleep(0.5)
             if start == 0 and verbose and embeddings:
                 log.info(f"Embedding dimension: {len(embeddings[0])} ({gemini_model})")
             ids = [f"chunk_{i}" for i in range(start, end)]
