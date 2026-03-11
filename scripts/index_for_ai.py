@@ -32,28 +32,18 @@ except ImportError:
 # Allow Hugging Face to download embed/encoder models from .env when not cached
 os.environ["HF_HUB_OFFLINE"] = "0"
 
-from lib.ingest import build_index, INDEX_PROFILES
+from lib.ingest import build_index
 from lib.log import configure_cli
 
 
-@click.command(help="Rebuild Draft RAG index.")
-@click.option(
-    "--profile",
-    type=click.Choice(["quick", "deep"], case_sensitive=False),
-    default="quick",
-    help="Index profile: quick (default, faster) or deep (higher-quality, nomic).",
-)
+@click.command(help="Rebuild Draft RAG index using DRAFT_EMBED_MODEL from .env.")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose progress output.")
-def main(profile: str, verbose: bool) -> None:
-    mode = (profile or "quick").strip().lower()
-    cfg = INDEX_PROFILES.get(mode, INDEX_PROFILES["quick"])
+def main(verbose: bool) -> None:
     if verbose:
         configure_cli()
-        # Show effective embed model (env overrides profile default)
         env_embed = os.environ.get("DRAFT_EMBED_MODEL", "").strip().strip("'\"")
-        effective_embed = env_embed or cfg["embed_model"]
-        click.echo(f"embed_model: {effective_embed}")
-    n = build_index(DRAFT_ROOT, verbose=verbose, profile=profile)
+        click.echo(f"embed_model: {env_embed or '(not set)'}")
+    n = build_index(DRAFT_ROOT, verbose=verbose)
     click.echo(f"Indexed {n} chunks.")
 
 

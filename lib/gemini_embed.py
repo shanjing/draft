@@ -7,6 +7,7 @@ Set DRAFT_EMBED_PROVIDER=gemini and DRAFT_EMBED_MODEL=gemini-embedding-2-preview
 
 from __future__ import annotations
 
+import logging
 
 _GEMINI_BATCH_LIMIT = 100  # Gemini batchEmbedContents API max items per request
 
@@ -17,6 +18,10 @@ def embed(texts: list[str], model: str, api_key: str) -> list[list[float]]:
     Splits into sub-batches of up to 100 (API limit) and concatenates results.
     Returns a list of embedding vectors (one per input text).
     """
+    # Suppress HTTP request logs (e.g. "HTTP Request: POST ... 200 OK") from the Google client
+    for _logger_name in ("urllib3", "httpx", "httpcore", "google.genai", "google_genai", "google_genai.models"):
+        logging.getLogger(_logger_name).setLevel(logging.WARNING)
+
     from google import genai  # google-genai package
 
     client = genai.Client(api_key=api_key)

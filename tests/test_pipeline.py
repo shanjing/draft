@@ -51,13 +51,13 @@ PROFILE_EMBEDS = {
 }
 
 
-def _set_pair_env(pair: str, profile: str = "quick") -> tuple[str, str, bool]:
+def _set_pair_env(pair: str) -> tuple[str, str, bool]:
     """Set env vars for the chosen pair. Returns (embed, reranker, use_ollama)."""
     pk = pair.upper() if pair.upper() in ("G", "L", "S") else pair.lower()
     if pk in ("G", "L", "S"):
         embed, reranker, use_ollama = PAIRS[pk]
     else:
-        embed = PROFILE_EMBEDS.get(profile.lower(), PROFILE_EMBEDS["quick"])
+        embed = PROFILE_EMBEDS["quick"]
         reranker = DEFAULT_CROSS_ENCODER
         use_ollama = False
     os.environ["DRAFT_EMBED_MODEL"] = embed
@@ -88,12 +88,6 @@ def _set_pair_env(pair: str, profile: str = "quick") -> tuple[str, str, bool]:
     help="Rebuild index from sources.yaml before retrieval (default: use existing index).",
 )
 @click.option(
-    "--profile",
-    type=click.Choice(["quick", "deep"], case_sensitive=False),
-    default="quick",
-    help="Index profile when building (quick or deep).",
-)
-@click.option(
     "-v", "--verbose",
     is_flag=True,
     help="Show detailed build and rerank output.",
@@ -102,11 +96,10 @@ def main(
     pair: str,
     query: str,
     rebuild: bool,
-    profile: str,
     verbose: bool,
 ) -> None:
     # Set env before any lib imports so ingest/ai_engine see correct values
-    embed_model, cross_encoder, use_ollama = _set_pair_env(pair, profile)
+    embed_model, cross_encoder, use_ollama = _set_pair_env(pair)
     # Reload .env with override=False so our vars above are not overwritten
     try:
         from dotenv import load_dotenv
@@ -127,7 +120,6 @@ def main(
         click.echo(f"  embed_model:      {embed_model}")
     click.echo(f"  cross_encoder:    {cross_encoder}")
     click.echo(f"  query:            {query}")
-    click.echo(f"  profile:          {profile}")
     click.echo()
 
     # Step 1: Build index from sources.yaml (only when --rebuild)
@@ -137,7 +129,7 @@ def main(
         click.echo("--- Building index from sources.yaml ---")
         if verbose:
             click.echo(f"  Collecting chunks, embedding with {embed_model}...")
-        n = build_index(DRAFT_ROOT, verbose=verbose, profile=profile)
+        n = build_index(DRAFT_ROOT, verbose=verbose)
         click.echo(f"  Indexed {n} chunks.")
         click.echo()
     else:

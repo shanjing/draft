@@ -364,14 +364,11 @@ def api_ask(body: AskBody):
 
 @app.post("/api/reindex_ai")
 def api_reindex_ai(body: ReindexAIBody | None = None):
-    """Rebuild the RAG vector index from draft docs (for the Ask feature)."""
+    """Rebuild the RAG vector index from draft docs using DRAFT_EMBED_MODEL from .env."""
     logger.info("Reindex AI requested")
     try:
-        mode = ((body.mode if body else "quick") or "quick").strip().lower()
-        if mode not in ("quick", "deep"):
-            return {"ok": False, "error": "Invalid mode. Use quick or deep.", "logs": []}
         result = subprocess.run(
-            [sys.executable, str(DRAFT_ROOT / "scripts" / "index_for_ai.py"), "--profile", mode, "-v"],
+            [sys.executable, str(DRAFT_ROOT / "scripts" / "index_for_ai.py"), "-v"],
             cwd=str(DRAFT_ROOT),
             capture_output=True,
             text=True,
@@ -389,10 +386,9 @@ def api_reindex_ai(body: ReindexAIBody | None = None):
         if result.returncode != 0:
             err = (result.stderr or result.stdout or "AI reindex failed.").strip()
             return {"ok": False, "error": err, "logs": logs}
-        label = "deep (nomic)" if mode == "deep" else "quick"
         if not logs:
-            logs = [f"Rebuilding AI index ({label})…", f"Indexed {n} chunks."]
-        return {"ok": True, "indexed": n, "mode": mode, "logs": logs}
+            logs = [f"Rebuilding AI index (DRAFT_EMBED_MODEL from .env)…", f"Indexed {n} chunks."]
+        return {"ok": True, "indexed": n, "logs": logs}
     except Exception as e:
         return {"ok": False, "error": str(e), "logs": [f"Error: {e}"]}
 

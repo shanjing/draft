@@ -1746,11 +1746,11 @@
         reindexBtn.textContent = 'Building…';
       }
       if (typeof beginExecution === 'function') beginExecution();
-      if (typeof appendConsoleLine === 'function') appendConsoleLine('$ reindex AI --profile ' + (mode || 'quick'));
+      if (typeof appendConsoleLine === 'function') appendConsoleLine('$ reindex AI (DRAFT_EMBED_MODEL from .env)');
       fetch('/api/reindex_ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: mode || 'quick' })
+        body: JSON.stringify({})
       })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -1772,7 +1772,7 @@
           if (typeof endExecution === 'function') endExecution();
         });
     }
-    if (reindexBtn) reindexBtn.addEventListener('click', function () { runAiReindex('quick'); });
+    if (reindexBtn) reindexBtn.addEventListener('click', function () { runAiReindex(); });
 
     function showAskError(msg) {
       errorEl.textContent = msg || '';

@@ -893,7 +893,6 @@ do_build_rag_flow() {
   fi
   if [ "$DRAFT_BUILD_RAG" = "Y" ]; then
     build_rag=1
-    rag_profile="quick"
   else
     while true; do
       read -r -p "Build RAG/index now? You can also do this later from the UI. (y/N): " build_rag
@@ -904,18 +903,6 @@ do_build_rag_flow() {
         *)     printf "  ${D}Please answer y or n.${N}\n" ;;
       esac
     done
-    if [ "$build_rag" = "1" ]; then
-      rag_profile="quick"
-      while true; do
-        read -r -p "Choose RAG/index rebuild mode: quick (faster, lighter model) or deep (nomic, slower). [quick/deep]: " rag_profile
-        rag_profile="$(printf '%s' "$rag_profile" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-        case "$rag_profile" in
-          quick|q|"") rag_profile="quick"; break ;;
-          deep|d)      rag_profile="deep"; break ;;
-          *)           printf "  ${D}Please answer quick or deep.${N}\n" ;;
-        esac
-      done
-    fi
   fi
   if [ "$build_rag" = "1" ]; then
     # Avoid duplicate rebuild: if index already built with current model, ask to confirm
@@ -953,7 +940,7 @@ except Exception:
   if [ "$build_rag" = "1" ]; then
     printf "${D}Build RAG/vector index ...${N}\n"
     "$SCRIPT_DIR/.venv/bin/pip" install -q -r "$REQUIREMENTS_FILE" 2>/dev/null || true
-    if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/index_for_ai.py --profile "$rag_profile" -v); then
+    if (cd "$SCRIPT_DIR" && "$PYTHON" scripts/index_for_ai.py -v); then
       printf "${G}done.${N}\n"
       _emb="$(env_val "DRAFT_EMBED_MODEL" "$DEFAULT_EMBED_MODEL")"
       [ -z "$_emb" ] && _emb="$DEFAULT_EMBED_MODEL"

@@ -247,7 +247,7 @@ def print_results(question: str, chunks: list, latency: float,
     if not chunks:
         print_section("ERROR")
         print("  No chunks returned. Is the index built?")
-        print("  Run: kubectl -n draft exec deployment/draft -- python scripts/index_for_ai.py --profile quick")
+        print("  Run: kubectl -n draft exec deployment/draft -- python scripts/index_for_ai.py")
         return
 
     best = chunks[0]

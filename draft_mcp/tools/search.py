@@ -60,7 +60,7 @@ def retrieve_chunks(
         except (InvalidCollectionException, Exception) as exc:
             if "does not exist" in str(exc) or "collection" in str(exc).lower():
                 raise IndexNotReady(
-                    "Vector store not built. Run 'python scripts/index_for_ai.py --profile quick' "
+                    "Vector store not built. Run 'python scripts/index_for_ai.py' (requires DRAFT_EMBED_MODEL in .env)"
                     "or use the UI Quick rebuild."
                 ) from exc
             raise
