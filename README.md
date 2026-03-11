@@ -6,6 +6,7 @@ To get started:
 ```bash
 ./setup.sh
 ```
+For a step-by-step walkthrough, see the [step-by-step demo](step-by-step-demo.md)**.
 
 ---
 
