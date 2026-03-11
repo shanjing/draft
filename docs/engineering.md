@@ -291,7 +291,12 @@ flowchart TB
 If a user **manually edits sources.yaml** and adds a repo:
 
 1. **Run Pull** (UI Pull button or `python scripts/pull.py`) — creates dirs, fetches/copies files, regenerates manifest. If you use the **UI** Pull, search is also rebuilt.
-2. **Search:** If you pulled via CLI only, trigger **Reindex** (UI or `POST /api/reindex`).
+2. **Search:** If you pulled via CLI only, trigger **Reindex** (UI or `POST /api/reindex`), for example:
+
+```bash
+source .venv/bin/activate
+curl -s -X POST http://localhost:8058/api/reindex
+```
 3. **Ask (RAG):** Rebuild the vector index: **Rebuild AI index** in the UI, or `python scripts/index_for_ai.py`, or `POST /api/reindex_ai`.
 
 After a manual edit, run **`python scripts/verify_sources.py`** to check structure; then Pull → Reindex search (if needed) → Rebuild AI index (if needed).
