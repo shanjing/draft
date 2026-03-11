@@ -277,6 +277,7 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
         cfg["embed_model"] = env_embed
         cfg["trust_remote_code"] = "nomic" in env_embed.lower() or "qwen" in env_embed.lower()
     use_ollama_embed = env_embed_provider == "ollama"
+    use_gemini_embed = env_embed_provider == "gemini"
 
     chunks = collect_chunks(
         draft_root,
@@ -300,7 +301,13 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
         client.delete_collection(COLLECTION_NAME)
     except Exception:
         pass
-    embed_provider = "ollama" if use_ollama_embed else "hf"
+    # Determine embed provider: ollama, gemini, or hf
+    if use_ollama_embed:
+        embed_provider = "ollama"
+    elif use_gemini_embed:
+        embed_provider = "gemini"
+    else:
+        embed_provider = "hf"
     collection = client.create_collection(
         COLLECTION_NAME,
         metadata={
@@ -323,7 +330,42 @@ def build_index(draft_root: Path, verbose: bool = False, profile: str = "quick")
     if tqdm is not None:
         pbar = tqdm(total=len(chunks), desc="Build RAG/vector index", unit="chunk", leave=True)
 
-    if use_ollama_embed:
+    if use_gemini_embed:
+        from lib.gemini_embed import embed as gemini_embed
+        gemini_model = str(cfg["embed_model"])
+        gemini_api_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+        if not gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY (or GOOGLE_API_KEY) must be set in .env to use Gemini embeddings")
+        for start in starts:
+            end = min(start + BATCH_SIZE, len(chunks))
+            batch = chunks[start:end]
+            texts = [c.text for c in batch]
+            embeddings = gemini_embed(texts, gemini_model, gemini_api_key)
+            if start == 0 and verbose and embeddings:
+                log.info(f"Embedding dimension: {len(embeddings[0])} ({gemini_model})")
+            ids = [f"chunk_{i}" for i in range(start, end)]
+            metadatas = []
+            for c in batch:
+                meta: dict = {
+                    "repo": c.repo,
+                    "path": c.path,
+                    "heading": (c.heading[:200] if c.heading else ""),
+                }
+                if c.start_line is not None and c.end_line is not None:
+                    meta["start_line"] = c.start_line
+                    meta["end_line"] = c.end_line
+                metadatas.append(meta)
+            collection.add(
+                ids=ids,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                documents=texts,
+            )
+            if pbar is not None:
+                pbar.update(len(batch))
+            elif verbose:
+                log.info(f"  Added {end}/{len(chunks)} chunks...")
+    elif use_ollama_embed:
         from lib.ollama_embed import embed as ollama_embed
         ollama_model = str(cfg["embed_model"])
         for start in starts:

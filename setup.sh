@@ -545,9 +545,14 @@ embed_model_feature() {
     mixedbread-ai/mxbai-embed-large-v1)
       printf "Strong MTEB performance, 1024 dims"
       ;;
+    gemini-embedding-2-preview)
+      printf "Multimodal, 3072 dims, requires GEMINI_API_KEY"
+      ;;
     *)
       if printf '%s' "$1" | grep -q '/'; then
         printf "Hugging Face model"
+      elif printf '%s' "$1" | grep -qi 'gemini'; then
+        printf "Gemini model"
       else
         printf "Ollama model"
       fi
@@ -575,6 +580,8 @@ do_config_embed_flow() {
   printf "  1) sentence-transformers/all-MiniLM-L6-v2 — %s\n" "$(embed_model_feature "sentence-transformers/all-MiniLM-L6-v2")"
   printf "  2) BAAI/bge-small-en-v1.5 — %s\n" "$(embed_model_feature "BAAI/bge-small-en-v1.5")"
   printf "  3) mixedbread-ai/mxbai-embed-large-v1 — %s\n" "$(embed_model_feature "mixedbread-ai/mxbai-embed-large-v1")"
+  printf "  ${D}Gemini (cloud, requires GEMINI_API_KEY in .env):${N}\n"
+  printf "  4) gemini-embedding-2-preview — %s\n" "$(embed_model_feature "gemini-embedding-2-preview")"
   echo ""
   OLLAMA_EMBED_AVAILABLE=()
   if command -v ollama >/dev/null 2>&1; then
@@ -588,14 +595,14 @@ do_config_embed_flow() {
   fi
   if [ ${#OLLAMA_EMBED_AVAILABLE[@]} -gt 0 ]; then
     printf "  ${D}Local Ollama models:${N}\n"
-    local i=4
+    local i=5
     for m in "${OLLAMA_EMBED_AVAILABLE[@]}"; do
       printf "  %s) %s (Ollama) — %s\n" "$i" "$m" "$(embed_model_feature "$m")"
       i=$((i + 1))
     done
     echo ""
   fi
-  printf "  Enter N (default), 1, 2, 3, a number for Ollama, or type a Hugging Face model (e.g. org/model):\n"
+  printf "  Enter N (default), 1–4, a number for Ollama, or type a Hugging Face model (e.g. org/model):\n"
   local choice
   read -r -p "Choice [N]: " choice
   choice="$(printf '%s' "$choice" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -612,10 +619,13 @@ do_config_embed_flow() {
     embed_model="BAAI/bge-small-en-v1.5"
   elif [ "$choice" = "3" ]; then
     embed_model="mixedbread-ai/mxbai-embed-large-v1"
+  elif [ "$choice" = "4" ]; then
+    embed_model="gemini-embedding-2-preview"
+    embed_provider="gemini"
   elif printf '%s' "$choice" | grep -q '/'; then
     embed_model="$choice"
   else
-    local idx=$((choice - 4))
+    local idx=$((choice - 5))
     if [ "$idx" -ge 0 ] 2>/dev/null && [ "$idx" -lt ${#OLLAMA_EMBED_AVAILABLE[@]} ]; then
       embed_model="${OLLAMA_EMBED_AVAILABLE[$idx]}"
       embed_provider="ollama"
@@ -636,7 +646,11 @@ do_config_embed_flow() {
   if [ "$embed_model" != "$prev_embed" ]; then
     printf "  ${Y}You *must* rebuild the index with the new model in step 5 (Build RAG/index).${N}\n"
   fi
-  printf "  ${D}First run may download the model from Hugging Face if not cached.${N}\n"
+  if [ "$embed_provider" = "gemini" ]; then
+    printf "  ${D}Gemini embedding: no local download. Ensure GEMINI_API_KEY is set in .env.${N}\n"
+  else
+    printf "  ${D}First run may download the model from Hugging Face if not cached.${N}\n"
+  fi
   echo ""
 }
 
@@ -648,15 +662,28 @@ do_config_encoder_flow() {
   local current_provider
   current_provider="$(env_val "DRAFT_EMBED_PROVIDER" "")"
 
-  printf "\n${D}--- Setup encoder (cross-encoder) model ---${N}\n"
-  printf "  Default: %s\n" "$DEFAULT_CROSS_ENCODER_MODEL"
-  printf "  ${D}16GB laptop: default (BGE-v2-m3) is fine.${N}\n"
+  printf "\n${D}--- Setup encoder (cross-encoder / reranker) model ---${N}\n"
+  printf "  ${G}[Current]${N} %s\n" "$(env_val "DRAFT_CROSS_ENCODER_MODEL" "$DEFAULT_CROSS_ENCODER_MODEL")"
   echo ""
+  printf "  N) No change (use current) [default]\n"
+  printf "  1) cross-encoder/ms-marco-MiniLM-L-6-v2 — Fast, good for most use cases\n"
+  printf "  2) BAAI/bge-reranker-v2-m3 — Higher precision, recommended for production\n"
+  printf "  Or type a Hugging Face cross-encoder model name:\n"
   local input_encoder
-  read -r -p "Encoder model (Enter for default): " input_encoder
+  read -r -p "Choice [N]: " input_encoder
   input_encoder="$(printf '%s' "$input_encoder" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   local cross_encoder_model="$DEFAULT_CROSS_ENCODER_MODEL"
-  [ -n "$input_encoder" ] && cross_encoder_model="$input_encoder"
+  if [ -z "$input_encoder" ] || [ "$(printf '%s' "$input_encoder" | tr '[:upper:]' '[:lower:]')" = "n" ]; then
+    printf "  ${D}No change. Keeping current encoder.${N}\n"
+    echo ""
+    return
+  elif [ "$input_encoder" = "1" ]; then
+    cross_encoder_model="cross-encoder/ms-marco-MiniLM-L-6-v2"
+  elif [ "$input_encoder" = "2" ]; then
+    cross_encoder_model="BAAI/bge-reranker-v2-m3"
+  else
+    cross_encoder_model="$input_encoder"
+  fi
   if [ -n "$current_provider" ]; then
     (cd "$SCRIPT_DIR" && "$PYTHON" scripts/setup_embed_config.py "$current_embed" "$cross_encoder_model" --provider "$current_provider")
   else

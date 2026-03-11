@@ -215,12 +215,17 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
     Semantic search over the vector store. Returns list of
     {"repo", "path", "heading", "text"} for the top-k chunks.
     """
+    _reload_env_from_file(draft_root)  # .env is source of truth; re-read so embed config is fresh
     coll = _get_collection(draft_root)
     if coll is None:
         return []
     meta = (getattr(coll, "metadata", None) or {})
-    embed_model = meta.get("embed_model") or EMBED_MODEL
-    embed_provider = (meta.get("embed_provider") or "").strip().lower()
+    # Prefer env vars (source of truth) over collection metadata so changes to .env take effect
+    # without rebuilding the index. Collection metadata is used as fallback for older collections.
+    env_provider = (os.environ.get("DRAFT_EMBED_PROVIDER") or "").strip().lower()
+    env_model = (os.environ.get("DRAFT_EMBED_MODEL") or "").strip().strip("'\"")
+    embed_provider = env_provider or (meta.get("embed_provider") or "").strip().lower()
+    embed_model = env_model or meta.get("embed_model") or EMBED_MODEL
     trust_remote_code = _coerce_bool(meta.get("trust_remote_code"), TRUST_REMOTE_CODE)
 
     def _query_with_hf(model_name: str, trust: bool):
@@ -243,9 +248,23 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
             include=["metadatas", "documents"],
         )
 
+    def _query_with_gemini(gemini_model: str):
+        from lib.gemini_embed import embed as gemini_embed
+        api_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+        q_embs = gemini_embed([query], gemini_model, api_key)
+        if not q_embs:
+            return {"metadatas": [[]], "documents": [[]]}
+        return coll.query(
+            query_embeddings=[q_embs[0]],
+            n_results=min(top_k, 20),
+            include=["metadatas", "documents"],
+        )
+
     try:
         if embed_provider == "ollama":
             result = _query_with_ollama(embed_model)
+        elif embed_provider == "gemini":
+            result = _query_with_gemini(embed_model)
         else:
             result = _query_with_hf(embed_model, trust_remote_code)
     except Exception as e:

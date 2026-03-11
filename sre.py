@@ -13,7 +13,6 @@ Both modes assume the server is reachable on http://localhost:8059.
 For Kubernetes, run `kubectl -n draft port-forward svc/draft 8059:8059` first.
 """
 
-import argparse
 import asyncio
 import json
 import os
@@ -25,6 +24,7 @@ import textwrap
 import time
 from pathlib import Path
 
+import click
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -34,6 +34,68 @@ ENV_FILE = SCRIPT_DIR / ".env"
 DEFAULT_URL = "http://localhost:8059/mcp"
 WIDTH = 72
 RULE = "━" * WIDTH
+
+# Known embedding dimensions for common models
+_EMBED_DIMS: dict[str, int] = {
+    "sentence-transformers/all-MiniLM-L6-v2": 384,
+    "BAAI/bge-small-en-v1.5": 384,
+    "BAAI/bge-large-en-v1.5": 1024,
+    "mixedbread-ai/mxbai-embed-large-v1": 1024,
+    "nomic-ai/nomic-embed-text-v1.5": 768,
+    "gemini-embedding-2-preview": 3072,
+    "qwen3-embedding:0.6b": 1024,
+    "mxbai-embed-large": 1024,
+    "nomic-embed-text": 768,
+}
+
+
+# ---------------------------------------------------------------------------
+# Model info
+# ---------------------------------------------------------------------------
+
+def _read_env_key(key: str) -> str:
+    """Read a single key from .env, stripping surrounding quotes."""
+    if not ENV_FILE.exists():
+        return ""
+    for line in ENV_FILE.read_text().splitlines():
+        m = re.match(r"^\s*" + re.escape(key) + r"\s*=\s*['\"]?(.*?)['\"]?\s*$", line)
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def _dim_label(model: str) -> str:
+    dim = _EMBED_DIMS.get(model)
+    return f"{dim}d" if dim else "unknown dims"
+
+
+def get_model_info_local() -> dict:
+    embed_model = _read_env_key("DRAFT_EMBED_MODEL") or "sentence-transformers/all-MiniLM-L6-v2"
+    embed_provider = _read_env_key("DRAFT_EMBED_PROVIDER") or "hf"
+    cross_encoder = _read_env_key("DRAFT_CROSS_ENCODER_MODEL") or "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    return {"embed_model": embed_model, "embed_provider": embed_provider, "cross_encoder": cross_encoder}
+
+
+def get_model_info_k8s() -> dict:
+    try:
+        out = subprocess.check_output(
+            ["kubectl", "-n", "draft", "exec", "deployment/draft", "--",
+             "python3", "-c",
+             "import os; print(os.getenv('DRAFT_EMBED_MODEL',''))\n"
+             "print(os.getenv('DRAFT_EMBED_PROVIDER','hf'))\n"
+             "print(os.getenv('DRAFT_CROSS_ENCODER_MODEL',''))"],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip().splitlines()
+        embed_model = out[0] if len(out) > 0 else ""
+        embed_provider = out[1] if len(out) > 1 else "hf"
+        cross_encoder = out[2] if len(out) > 2 else ""
+    except Exception:
+        embed_model = embed_provider = cross_encoder = ""
+    return {
+        "embed_model": embed_model or "unknown",
+        "embed_provider": embed_provider or "hf",
+        "cross_encoder": cross_encoder or "unknown",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +243,7 @@ def print_section(title: str) -> None:
 
 
 def print_results(question: str, chunks: list, latency: float,
-                  url: str, mode: str) -> None:
+                  url: str, mode: str, model_info: dict | None = None) -> None:
     if not chunks:
         print_section("ERROR")
         print("  No chunks returned. Is the index built?")
@@ -218,6 +280,13 @@ def print_results(question: str, chunks: list, latency: float,
     print(f"  Server:    {url}")
     print(f"  Latency:   {latency:.2f}s")
     print(f"  Results:   {len(chunks)} chunks")
+    if model_info:
+        embed = model_info.get("embed_model", "unknown")
+        provider = model_info.get("embed_provider", "hf")
+        reranker = model_info.get("cross_encoder", "unknown")
+        provider_tag = f" ({provider})" if provider and provider != "hf" else ""
+        print(f"  Embed:     {embed}{provider_tag}  [{_dim_label(embed)}]")
+        print(f"  Reranker:  {reranker}")
     print()
 
 
@@ -225,30 +294,23 @@ def print_results(question: str, chunks: list, latency: float,
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Query the Draft MCP server with a random SRE question.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "-l", "--local",
-        action="store_true",
-        help="Local mode: Draft runs as a local daemon. Token read from .env. "
-             "(Default: Kubernetes mode — token from kubectl secret.)",
-    )
-    parser.add_argument(
-        "--url",
-        default=DEFAULT_URL,
-        help=f"MCP server URL (default: {DEFAULT_URL})",
-    )
-    args = parser.parse_args()
+@click.command()
+@click.option("-l", "--local", is_flag=True,
+              help="Local mode: Draft runs as a local daemon. Token read from .env. "
+                   "(Default: Kubernetes mode — token from kubectl secret.)")
+@click.option("--url", default=DEFAULT_URL, show_default=True,
+              help="MCP server URL.")
+@click.option("-q", "--question", default=None,
+              help="Question to ask. If omitted, a random question is picked from tests/sre_questions.md.")
+def main(local: bool, url: str, question: str | None) -> None:
+    """Query the Draft MCP server with an SRE question."""
+    mode = "local" if local else "kubernetes"
+    token = get_token_local() if local else get_token_k8s()
+    model_info = get_model_info_local() if local else get_model_info_k8s()
+    q = question.strip() if question else pick_question()
 
-    mode = "local" if args.local else "kubernetes"
-    token = get_token_local() if args.local else get_token_k8s()
-    question = pick_question()
-
-    chunks, latency = asyncio.run(query_draft(args.url, token, question))
-    print_results(question, chunks, latency, args.url, mode)
+    chunks, latency = asyncio.run(query_draft(url, token, q))
+    print_results(q, chunks, latency, url, mode, model_info)
 
 
 if __name__ == "__main__":
