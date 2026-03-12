@@ -887,10 +887,7 @@ do_config_llm_flow() {
 }
 
 do_build_rag_flow() {
-  if ! (cd "$SCRIPT_DIR" && "$PYTHON" scripts/check_llm_ready.py 2>/dev/null); then
-    printf "${D}LLM not configured; skip RAG build. Configure LLM first.${N}\n"
-    return
-  fi
+  # Build RAG index only needs DRAFT_EMBED_MODEL (step 2). LLM is for Ask (step 4/6).
   if [ "$DRAFT_BUILD_RAG" = "Y" ]; then
     build_rag=1
   else
@@ -927,7 +924,7 @@ except Exception:
     _current="$(env_val "DRAFT_EMBED_MODEL" "$DEFAULT_EMBED_MODEL")"
     [ -z "$_current" ] && _current="$DEFAULT_EMBED_MODEL"
     if [ -n "$_baseline" ] && [ "$_current" = "$_baseline" ]; then
-      read -r -p "The current index was built with the current model. If a rebuild is indeed needed? (y/N): " _confirm_rebuild
+      read -r -p "The current index was built with the current model ($_current). Is a rebuild indeed needed? (y/N): " _confirm_rebuild
       _confirm_rebuild="$(printf '%s' "${_confirm_rebuild:-n}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
       if [ "$_confirm_rebuild" != "y" ] && [ "$_confirm_rebuild" != "yes" ]; then
         build_rag=0
