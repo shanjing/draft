@@ -37,7 +37,7 @@ def _split_into_sections(content: str) -> list[tuple[str, str]]:
     current_heading = ""
     """
     Using the README.md as an example:
-    pattern is an iter of (#{2,3})\s*(.+)$ matched objects
+    pattern is an iter of (#{2,3})\\s*(.+)$ matched objects
     m.group(1) is the ## or ###
     m.group(2) is the heading. e.g. "Getting Started (quick start)"
     m.start() is the start index of the match, an integer
