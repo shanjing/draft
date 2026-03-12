@@ -52,6 +52,12 @@ EXCLUDE_DIRS = (
 )
 
 COLLECTION_NAME = "draft_docs"
+DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Backward-compat for modules that still import these names from ingest.
+# Runtime code should prefer DRAFT_EMBED_MODEL and collection metadata.
+EMBED_MODEL = (os.environ.get("DRAFT_EMBED_MODEL") or "").strip().strip("'\"") or DEFAULT_EMBED_MODEL
+TRUST_REMOTE_CODE = "nomic" in EMBED_MODEL.lower() or "qwen" in EMBED_MODEL.lower()
 
 # Default chunk/batch when building from DRAFT_EMBED_MODEL only (no quick/deep profiles).
 INDEX_DEFAULTS = {
