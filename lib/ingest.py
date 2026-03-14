@@ -323,9 +323,11 @@ def build_index(draft_root: Path, verbose: bool = False) -> int:
 
     if use_onnx_embed:
         from lib.onnx_embed import embed as onnx_embed
-        onnx_model_dir = os.environ.get("DRAFT_ONNX_EMBED_DIR", "").strip()
-        if not onnx_model_dir:
+        from lib.ai_engine import _resolve_onnx_embed_dir
+        onnx_base_dir = os.environ.get("DRAFT_ONNX_EMBED_DIR", "").strip()
+        if not onnx_base_dir:
             raise RuntimeError("DRAFT_ONNX_EMBED_DIR must be set in .env to use ONNX embeddings")
+        onnx_model_dir = _resolve_onnx_embed_dir(onnx_base_dir, cfg["embed_model"])
         for start in starts:
             end = min(start + BATCH_SIZE, len(chunks))
             batch = chunks[start:end]

@@ -9,13 +9,14 @@ Usage:
 
 Output layout:
     onnx_models/
-    ├── embed/          # all-MiniLM-L6-v2
-    │   ├── model.onnx
-    │   ├── tokenizer.json
-    │   ├── tokenizer_config.json
-    │   ├── special_tokens_map.json
-    │   └── vocab.txt
-    └── rerank/         # cross-encoder/ms-marco-MiniLM-L-6-v2
+    ├── embed/
+    │   └── all-MiniLM-L6-v2/   # named after the model (model_name.split("/")[-1])
+    │       ├── model.onnx
+    │       ├── tokenizer.json
+    │       ├── tokenizer_config.json
+    │       ├── special_tokens_map.json
+    │       └── vocab.txt
+    └── rerank/         # cross-encoder/ms-marco-MiniLM-L-6-v2 (flat, single reranker)
         ├── model.onnx
         ├── tokenizer.json
         ├── tokenizer_config.json
@@ -85,19 +86,17 @@ def export_embedding_model(model_name: str, output_dir: Path) -> None:
     size_mb = onnx_path.stat().st_size / (1024 * 1024)
     print(f"  Exported ONNX model: {onnx_path} ({size_mb:.1f} MB)")
 
-    # Clean up unnecessary files (keep only what ONNX inference needs)
+    # Clean up unnecessary files (keep only what ONNX inference needs).
+    # Only remove files — subdirectories are sibling model exports, leave them alone.
     for f in output_dir.iterdir():
-        if f.name not in (
+        if f.is_file() and f.name not in (
             "model.onnx",
             "tokenizer.json",
             "tokenizer_config.json",
             "special_tokens_map.json",
             "vocab.txt",
         ):
-            if f.is_file():
-                f.unlink()
-            elif f.is_dir():
-                shutil.rmtree(f)
+            f.unlink()
 
 
 def export_rerank_model(model_name: str, output_dir: Path) -> None:
@@ -191,7 +190,8 @@ def main():
     output_root = Path(args.output_dir)
 
     if not args.rerank_only:
-        export_embedding_model(args.embed_model, output_root / "embed")
+        embed_shortname = args.embed_model.split("/")[-1]
+        export_embedding_model(args.embed_model, output_root / "embed" / embed_shortname)
         print()
 
     if not args.embed_only:

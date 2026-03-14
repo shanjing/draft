@@ -23,6 +23,27 @@ _SESSION_CACHE: dict[str, object] = {}
 _TOKENIZER_CACHE: dict[str, object] = {}
 
 
+def _get_providers() -> list[str]:
+    """Return ONNX Runtime execution providers.
+
+    Reads DRAFT_ONNX_PROVIDERS (comma-separated) if set, otherwise auto-detects:
+    prefers CUDAExecutionProvider or TensorrtExecutionProvider when available,
+    falls back to CPUExecutionProvider.
+    """
+    val = os.environ.get("DRAFT_ONNX_PROVIDERS", "").strip()
+    if val:
+        return [p.strip() for p in val.split(",")]
+    try:
+        import onnxruntime as ort
+        available = ort.get_available_providers()
+        for p in ("TensorrtExecutionProvider", "CUDAExecutionProvider"):
+            if p in available:
+                return [p, "CPUExecutionProvider"]
+    except Exception:
+        pass
+    return ["CPUExecutionProvider"]
+
+
 def _get_session(model_dir: str):
     """Load and cache an ONNX Runtime InferenceSession."""
     if model_dir not in _SESSION_CACHE:
@@ -32,7 +53,7 @@ def _get_session(model_dir: str):
         if not os.path.isfile(model_path):
             raise FileNotFoundError(f"ONNX model not found: {model_path}")
         _SESSION_CACHE[model_dir] = ort.InferenceSession(
-            model_path, providers=["CPUExecutionProvider"]
+            model_path, providers=_get_providers()
         )
     return _SESSION_CACHE[model_dir]
 

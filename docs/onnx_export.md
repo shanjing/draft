@@ -31,18 +31,27 @@ Output layout:
 
 ```
 /path/to/onnx_models/
-├── embed/                          # sentence-transformers/all-MiniLM-L6-v2
-│   ├── model.onnx                  # 86.8 MB
-│   ├── tokenizer.json
-│   ├── tokenizer_config.json
-│   ├── special_tokens_map.json
-│   └── vocab.txt
-└── rerank/                         # cross-encoder/ms-marco-MiniLM-L-6-v2
+├── embed/
+│   └── all-MiniLM-L6-v2/          # named after model (model_name.split("/")[-1])
+│       ├── model.onnx              # 86.8 MB
+│       ├── tokenizer.json
+│       ├── tokenizer_config.json
+│       ├── special_tokens_map.json
+│       └── vocab.txt
+└── rerank/                         # cross-encoder/ms-marco-MiniLM-L-6-v2 (flat, single reranker)
     ├── model.onnx                  # 86.8 MB
     ├── tokenizer.json
     ├── tokenizer_config.json
     ├── special_tokens_map.json
     └── vocab.txt
+```
+
+Multiple embedding models can coexist under `embed/` — the runtime resolves the correct subdir from `DRAFT_EMBED_MODEL` automatically:
+
+```
+embed/
+├── all-MiniLM-L6-v2/   # sentence-transformers/all-MiniLM-L6-v2
+└── bge-small-en-v1.5/  # BAAI/bge-small-en-v1.5
 ```
 
 To export only one model:
@@ -139,21 +148,63 @@ helm upgrade --install draft ./kubernetes/draft -n draft --create-namespace \
 | Variable | Default (in image) | Description |
 |---|---|---|
 | `DRAFT_EMBED_PROVIDER` | *(unset — falls back to hf)* | Set to `onnx` to activate ONNX Runtime |
-| `DRAFT_ONNX_EMBED_DIR` | `/app/onnx_models/embed` | Path to embedding model dir (`model.onnx` + `tokenizer.json`) |
-| `DRAFT_ONNX_RERANK_DIR` | `/app/onnx_models/rerank` | Path to cross-encoder model dir |
+| `DRAFT_ONNX_EMBED_DIR` | `/app/onnx_models/embed` | Base path for embedding models; runtime appends `/<shortname>` automatically |
+| `DRAFT_ONNX_RERANK_DIR` | `/app/onnx_models/rerank` | Path to cross-encoder model dir (flat, single reranker) |
 | `DRAFT_ONNX_RERANK_MODEL` | *(unset)* | Display name override for the ONNX reranker; defaults to `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+| `DRAFT_ONNX_PROVIDERS` | *(auto-detect)* | Comma-separated ONNX execution providers; auto-detects GPU if available, falls back to CPU. See [GPU section](#gpu-onnx-runtime) |
 
 ---
 
 ## Building the ONNX image
 
 ```bash
-# ONNX-only (no PyTorch, ~724 MB):
+# ONNX CPU-only (no PyTorch, ~724 MB) — default for Docker/K8s:
 docker build --build-arg ONNX_ONLY=1 -t draft:onnx .
 
-# Standard (PyTorch included, ~1.78 GB):
+# ONNX GPU (onnxruntime-gpu, no PyTorch) — for CUDA nodes:
+docker build --build-arg ONNX_GPU=1 -t draft:onnx-gpu .
+
+# Standard (PyTorch included, ~1.78 GB) — for local dev or MPS:
 docker build -t draft:pytorch .
 ```
+
+`ONNX_GPU=1` installs `onnxruntime-gpu` instead of `onnxruntime` (mutually exclusive PyPI packages) and skips PyTorch. The `.onnx` model files are the same for both CPU and GPU — no re-export needed.
+
+---
+
+## GPU ONNX Runtime
+
+By default the runtime auto-detects the best available provider: `TensorrtExecutionProvider` → `CUDAExecutionProvider` → `CPUExecutionProvider`. The image built with `ONNX_GPU=1` ships `onnxruntime-gpu`, which exposes CUDA/TensorRT providers when a GPU is present at runtime.
+
+Override with `DRAFT_ONNX_PROVIDERS` to force a specific provider order:
+
+```bash
+# Force CUDA (skip TensorRT probe):
+DRAFT_ONNX_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider
+
+# Force CPU even on a GPU node:
+DRAFT_ONNX_PROVIDERS=CPUExecutionProvider
+```
+
+For K8s GPU pods, add a `resources` + `nodeSelector` to `values.local.yaml`:
+
+```yaml
+resources:
+  limits:
+    nvidia.com/gpu: 1
+
+nodeSelector:
+  accelerator: nvidia-tesla-t4
+```
+
+And set the image tag to the GPU build:
+
+```yaml
+image:
+  tag: onnx-gpu
+```
+
+**Practical note:** For an MCP RAG server handling individual queries, CPU ONNX is typically sufficient (10–30 ms per query on modern CPUs). GPU becomes worthwhile only at high batch-ingest volumes or 1,000+ concurrent requests per pod.
 
 ---
 

@@ -16,19 +16,27 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
 
-# Build mode: set ONNX_ONLY=1 to skip PyTorch/sentence-transformers (saves ~2 GB).
+# Build mode args:
+#   ONNX_ONLY=1   — skip PyTorch/sentence-transformers (saves ~2 GB); required for ONNX_GPU=1
+#   ONNX_GPU=1    — install onnxruntime-gpu instead of onnxruntime (mutually exclusive packages)
+#                   implies ONNX_ONLY=1; requires a CUDA-capable base image at runtime
 ARG ONNX_ONLY=0
+ARG ONNX_GPU=0
 
-# Install CPU-only PyTorch first (skipped for ONNX-only builds).
-RUN if [ "$ONNX_ONLY" = "0" ]; then \
+# Install CPU-only PyTorch first (skipped for ONNX-only or GPU builds).
+RUN if [ "$ONNX_ONLY" = "0" ] && [ "$ONNX_GPU" = "0" ]; then \
       pip install --no-cache-dir torch --extra-index-url https://download.pytorch.org/whl/cpu; \
     fi
 
 # Install requirements, excluding pytest (dev-only).
-# For ONNX-only builds, also exclude torch/sentence-transformers/transformers.
-RUN if [ "$ONNX_ONLY" = "1" ]; then \
-      grep -v -E '^(pytest|sentence-transformers|transformers[^/])' requirements.txt \
+# ONNX_GPU=1 or ONNX_ONLY=1: exclude torch/sentence-transformers/transformers and swap
+# onnxruntime for onnxruntime-gpu (these two packages are mutually exclusive on PyPI).
+RUN if [ "$ONNX_GPU" = "1" ] || [ "$ONNX_ONLY" = "1" ]; then \
+      grep -v -E '^(pytest|sentence-transformers|transformers[^/]|onnxruntime[^-])' requirements.txt \
         | pip install --no-cache-dir -r /dev/stdin; \
+      if [ "$ONNX_GPU" = "1" ]; then \
+        pip install --no-cache-dir onnxruntime-gpu; \
+      fi; \
     else \
       grep -v '^pytest' requirements.txt \
         | pip install --no-cache-dir -r /dev/stdin; \

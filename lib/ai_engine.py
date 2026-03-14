@@ -201,6 +201,27 @@ def _get_cross_encoder(model_name: str | None = None):
     return _CROSS_ENCODER_CACHE[name]
 
 
+def _resolve_onnx_embed_dir(base_dir: str, model_name: str) -> str:
+    """Resolve the ONNX embed model directory from a base dir and model name.
+
+    Supports two layouts:
+      Flat (legacy):  base_dir/model.onnx
+      Named (multi):  base_dir/<shortname>/model.onnx
+
+    The short name is the last component of the HF model name
+    (e.g. 'BAAI/bge-small-en-v1.5' → 'bge-small-en-v1.5').
+    If the named subdir exists it takes precedence; otherwise falls back to
+    base_dir directly so single-model setups continue to work unchanged.
+    """
+    import os
+    shortname = model_name.split("/")[-1] if model_name else ""
+    if shortname:
+        candidate = os.path.join(base_dir, shortname)
+        if os.path.isfile(os.path.join(candidate, "model.onnx")):
+            return candidate
+    return base_dir
+
+
 def _use_onnx_rerank() -> bool:
     """True if ONNX reranking is configured (DRAFT_EMBED_PROVIDER=onnx and DRAFT_ONNX_RERANK_DIR set)."""
     provider = _env_strip("DRAFT_EMBED_PROVIDER").lower()
@@ -291,9 +312,10 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
 
     def _query_with_onnx():
         from lib.onnx_embed import embed as onnx_embed
-        onnx_model_dir = _env_strip("DRAFT_ONNX_EMBED_DIR")
-        if not onnx_model_dir:
+        onnx_base_dir = _env_strip("DRAFT_ONNX_EMBED_DIR")
+        if not onnx_base_dir:
             raise RuntimeError("DRAFT_ONNX_EMBED_DIR must be set to use ONNX embeddings")
+        onnx_model_dir = _resolve_onnx_embed_dir(onnx_base_dir, embed_model)
         q_embs = onnx_embed([query], onnx_model_dir)
         if not q_embs:
             return {"metadatas": [[]], "documents": [[]]}
