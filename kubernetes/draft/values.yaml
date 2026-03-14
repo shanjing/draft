@@ -123,10 +123,20 @@ sourcesConfig: ""
 #       mountPath: /mnt/docs/specs
 docSources: []
 
+# ONNX model files for air-gapped embedding/reranking (no PyTorch needed).
+# When DRAFT_EMBED_PROVIDER=onnx, the app uses ONNX Runtime instead of sentence-transformers.
+# Models can be baked into the Docker image (scripts/export_onnx.py → COPY onnx_models/)
+# or mounted from the host via hostPath.
+onnxModels:
+  # Host path containing ONNX model files (embed/ and rerank/ subdirs).
+  # If empty, models are expected to be baked into the Docker image.
+  hostPath: ""
+
 # HuggingFace model cache configuration.
 # Draft uses sentence-transformers for embeddings and a cross-encoder for reranking.
 # Models are stored at DRAFT_HOME/.cache/huggingface (HF_HOME env var).
 # The PVC persists this path across pod restarts, so models download once then cache.
+# Not needed when using ONNX provider (DRAFT_EMBED_PROVIDER=onnx).
 hfCache:
   # Path on the HOST node to mount as the HuggingFace model cache.
   # When set, this directory is bind-mounted over DRAFT_HOME/.cache/huggingface,
@@ -146,6 +156,10 @@ env:
   # "1" = offline/strict: block all HF Hub network access; fails if a model is not cached.
   #        Use "1" when all models are pre-cached via hfCache.hostPath or already on the PVC.
   hfHubOffline: "0"
+  # Embedding provider: onnx | hf | ollama | gemini
+  # Set to "onnx" together with onnxModels.hostPath to use ONNX Runtime (no PyTorch needed).
+  # Empty = hf (sentence-transformers / PyTorch).
+  embedProvider: ""
   # LLM provider for AI-assisted Q&A (RAG answers).
   # Supported: claude | gemini | openai | ollama
   # Empty = AI Q&A disabled; the MCP tool still returns search results without an LLM answer.
@@ -197,19 +211,19 @@ service:
   port: 8059
 
 # Resource requests and limits for the MCP server container.
-# The sentence-transformers embedding model and cross-encoder reranker require memory.
-# Recommended minimums when HF models run inside the pod:
-#   memory request >= 1Gi (embedding model alone uses ~500 MB)
-#   memory limit   >= 2Gi (reranker + embedding + app overhead)
+# With ONNX provider: memory is much lower (~50 MB runtime + ~175 MB models).
+#   memory request >= 256Mi, memory limit >= 512Mi
+# With HF/PyTorch provider: sentence-transformers embedding + cross-encoder need more:
+#   memory request >= 1Gi, memory limit >= 2Gi
 # Leave empty to use cluster defaults (not recommended for production).
 resources: {}
-# Example:
+# Example (ONNX):
 #   requests:
 #     cpu: 250m
-#     memory: 1Gi
+#     memory: 256Mi
 #   limits:
 #     cpu: 1000m
-#     memory: 2Gi
+#     memory: 512Mi
 
 # Annotations to add to the pod (not the Deployment).
 # Useful for Prometheus scraping, Vault agent injection, Datadog APM, etc.

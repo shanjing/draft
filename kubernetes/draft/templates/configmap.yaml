@@ -11,6 +11,11 @@ data:
   # Hugging Face: disable network access, use only pre-downloaded / cached models
   HF_HUB_OFFLINE: {{ .Values.env.hfHubOffline | quote }}
 
+  # Embedding provider (non-secret; controls which embedding backend the app uses)
+  {{- if .Values.env.embedProvider }}
+  DRAFT_EMBED_PROVIDER: {{ .Values.env.embedProvider | quote }}
+  {{- end }}
+
   # LLM provider and model (non-secret identifiers; API keys go in the Secret)
   {{- if .Values.env.llmProvider }}
   DRAFT_LLM_PROVIDER: {{ .Values.env.llmProvider | quote }}

@@ -16,21 +16,33 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
 
-# Install CPU-only PyTorch first — prevents sentence-transformers from pulling
-# CUDA wheels. On ARM64 (Apple Silicon / Graviton / Tau T2A) torch is already
-# CPU-only; this guards against CUDA bloat on x86_64.
-RUN pip install --no-cache-dir \
-    torch --extra-index-url https://download.pytorch.org/whl/cpu
+# Build mode: set ONNX_ONLY=1 to skip PyTorch/sentence-transformers (saves ~2 GB).
+ARG ONNX_ONLY=0
 
-# Install remaining requirements, excluding pytest (dev-only).
-# torch is already installed; pip will not upgrade to a CUDA variant.
-RUN grep -v '^pytest' requirements.txt \
-    | pip install --no-cache-dir -r /dev/stdin
+# Install CPU-only PyTorch first (skipped for ONNX-only builds).
+RUN if [ "$ONNX_ONLY" = "0" ]; then \
+      pip install --no-cache-dir torch --extra-index-url https://download.pytorch.org/whl/cpu; \
+    fi
+
+# Install requirements, excluding pytest (dev-only).
+# For ONNX-only builds, also exclude torch/sentence-transformers/transformers.
+RUN if [ "$ONNX_ONLY" = "1" ]; then \
+      grep -v -E '^(pytest|sentence-transformers|transformers[^/])' requirements.txt \
+        | pip install --no-cache-dir -r /dev/stdin; \
+    else \
+      grep -v '^pytest' requirements.txt \
+        | pip install --no-cache-dir -r /dev/stdin; \
+    fi
 
 # ---- Stage 2: final runtime ----
 # Only contains the Python runtime, the virtualenv, and application code.
 # No build tools, no pip cache, no dev dependencies.
 FROM python:3.12-slim
+
+# Non-root app user — runs the server without root privileges.
+# UID/GID 1000 is the conventional first non-system user on Linux.
+RUN groupadd -r app --gid 1000 && \
+    useradd -r -g app --uid 1000 --home /home/app --create-home app
 
 WORKDIR /app
 
@@ -40,10 +52,23 @@ COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code (respects .dockerignore)
-COPY . .
+COPY --chown=app:app . .
+
+# ONNX models — baked in for air-gapped deployment.
+# Place onnx_models/ in the build context (created by scripts/export_onnx.py).
+# The directory is optional; the COPY uses a wildcard so the build succeeds
+# even if the directory is absent (non-ONNX builds).
+COPY --chown=app:app onnx_model[s]/ /app/onnx_models/
+
+# Default ONNX env vars (overridable at runtime).
+# These only take effect when DRAFT_EMBED_PROVIDER=onnx is set in .env or env.
+ENV DRAFT_ONNX_EMBED_DIR=/app/onnx_models/embed
+ENV DRAFT_ONNX_RERANK_DIR=/app/onnx_models/rerank
 
 # MCP HTTP server (8059) and optional UI (8058)
 EXPOSE 8059 8058
+
+USER app
 
 # Default: run MCP server.
 # To run the UI instead, override CMD in docker run or the Helm chart:
