@@ -29,8 +29,9 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 SCRIPT_DIR = Path(__file__).parent
+REPO_ROOT = SCRIPT_DIR.parent
 QUESTIONS_FILE = SCRIPT_DIR / "tests" / "sre_questions.md"
-ENV_FILE = SCRIPT_DIR / ".env"
+ENV_FILE = REPO_ROOT / ".env"
 DEFAULT_URL = "http://localhost:8059/mcp"
 WIDTH = 72
 RULE = "━" * WIDTH

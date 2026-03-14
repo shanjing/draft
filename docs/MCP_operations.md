@@ -360,6 +360,65 @@ claude mcp list
 
 MCP servers connect at session start. **Start a new `claude` session** after adding the server, then run `/mcp` — you should see `draft` with `search_docs`, `retrieve_chunks`, `get_document`, `list_documents`, `list_sources`, and `query_docs`.
 
+### Claude Code (HTTP — local daemon)
+
+When the MCP server is already running as a daemon on port 8059, connect Claude Code via HTTP transport. Get the token from `.env` first:
+
+```bash
+TOKEN=$(grep DRAFT_MCP_TOKEN .env | cut -d= -f2)
+
+claude mcp add --transport http draft-local http://localhost:8059/mcp \
+  --header "Authorization: Bearer $TOKEN"
+```
+
+Verify and start a new session:
+
+```bash
+claude mcp list
+# draft-local  http://localhost:8059/mcp
+```
+
+### Claude Code (HTTP — Docker container)
+
+For the ONNX Docker image, Claude Code can connect via HTTP after starting the container as a daemon:
+
+```bash
+# Start the container (expose port)
+docker run -d --name draft-mcp \
+  --env-file /Users/shanjing/workspace/draft/.env.docker \
+  -v /Users/shanjing/workspace/draft/.env:/app/.env:ro \
+  -v /Users/shanjing/.draft:/home/app/.draft \
+  -v /Users/shanjing/workspace/onnx_models:/app/onnx_models:ro \
+  -p 8059:8059 \
+  draft:onnx
+
+# Get the token
+TOKEN=$(grep DRAFT_MCP_TOKEN /Users/shanjing/workspace/draft/.env | cut -d= -f2)
+
+# Register with Claude Code
+claude mcp add --transport http draft-docker http://localhost:8059/mcp \
+  --header "Authorization: Bearer $TOKEN"
+```
+
+Alternatively, let Claude Code manage the container lifecycle via stdio (no port or token needed):
+
+```bash
+claude mcp add --transport stdio draft-docker -- \
+  docker run --rm -i \
+  --env-file /Users/shanjing/workspace/draft/.env.docker \
+  -v /Users/shanjing/workspace/draft/.env:/app/.env:ro \
+  -v /Users/shanjing/.draft:/home/app/.draft \
+  -v /Users/shanjing/workspace/onnx_models:/app/onnx_models:ro \
+  draft:onnx \
+  python scripts/serve_mcp.py --stdio
+```
+
+The `-i` flag keeps stdin open for the stdio transport. Claude Code starts and stops the container automatically each session.
+
+See [onnx_export.md](onnx_export.md) for the full Docker setup (model export, `.env.docker`, volume layout).
+
+---
+
 ### HTTP client (any agent / curl)
 
 **Step 1: Get the token**

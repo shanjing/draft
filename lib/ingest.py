@@ -21,11 +21,9 @@ import warnings
 from pathlib import Path
 
 from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
-from transformers.utils import logging as transformers_logging
-from huggingface_hub import logging as hf_logging
 
-# Allow Hugging Face to download embed model from .env when not cached (set HF_HUB_OFFLINE=1 in .env for strict offline)
+# sentence_transformers / transformers / huggingface_hub are lazy-imported inside
+# the hf provider branch so they are not loaded for onnx/ollama/gemini providers.
 
 from lib.chunking import chunk_markdown, chunk_python, Chunk
 from lib.gitignore import get_git_ignored_set
@@ -255,8 +253,6 @@ def build_index(draft_root: Path, verbose: bool = False) -> int:
         from tqdm import tqdm
     except ImportError:
         tqdm = None  # type: ignore[assignment]
-    transformers_logging.set_verbosity_error()
-    hf_logging.set_verbosity_error()
 
     # Embedding model from .env only (no quick/deep profiles).
     env_embed = os.environ.get("DRAFT_EMBED_MODEL", "").strip().strip("'\"")
@@ -270,6 +266,7 @@ def build_index(draft_root: Path, verbose: bool = False) -> int:
     cfg["trust_remote_code"] = "nomic" in env_embed.lower() or "qwen" in env_embed.lower()
     use_ollama_embed = env_embed_provider == "ollama"
     use_gemini_embed = env_embed_provider == "gemini"
+    use_onnx_embed = env_embed_provider == "onnx"
 
     chunks = collect_chunks(
         draft_root,
@@ -293,8 +290,10 @@ def build_index(draft_root: Path, verbose: bool = False) -> int:
         client.delete_collection(COLLECTION_NAME)
     except Exception:
         pass
-    # Determine embed provider: ollama, gemini, or hf
-    if use_ollama_embed:
+    # Determine embed provider: onnx, ollama, gemini, or hf
+    if use_onnx_embed:
+        embed_provider = "onnx"
+    elif use_ollama_embed:
         embed_provider = "ollama"
     elif use_gemini_embed:
         embed_provider = "gemini"
@@ -322,7 +321,41 @@ def build_index(draft_root: Path, verbose: bool = False) -> int:
     if tqdm is not None and verbose:
         pbar = tqdm(total=len(chunks), desc="Build RAG/vector index", unit="chunk", leave=True)
 
-    if use_gemini_embed:
+    if use_onnx_embed:
+        from lib.onnx_embed import embed as onnx_embed
+        onnx_model_dir = os.environ.get("DRAFT_ONNX_EMBED_DIR", "").strip()
+        if not onnx_model_dir:
+            raise RuntimeError("DRAFT_ONNX_EMBED_DIR must be set in .env to use ONNX embeddings")
+        for start in starts:
+            end = min(start + BATCH_SIZE, len(chunks))
+            batch = chunks[start:end]
+            texts = [c.text for c in batch]
+            embeddings = onnx_embed(texts, onnx_model_dir)
+            if start == 0 and verbose and embeddings:
+                log.info(f"Embedding dimension: {len(embeddings[0])} (onnx: {onnx_model_dir})")
+            ids = [f"chunk_{i}" for i in range(start, end)]
+            metadatas = []
+            for c in batch:
+                meta: dict = {
+                    "repo": c.repo,
+                    "path": c.path,
+                    "heading": (c.heading[:200] if c.heading else ""),
+                }
+                if c.start_line is not None and c.end_line is not None:
+                    meta["start_line"] = c.start_line
+                    meta["end_line"] = c.end_line
+                metadatas.append(meta)
+            collection.add(
+                ids=ids,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                documents=texts,
+            )
+            if pbar is not None:
+                pbar.update(len(batch))
+            elif verbose:
+                log.info(f"  Added {end}/{len(chunks)} chunks...")
+    elif use_gemini_embed:
         from lib.gemini_embed import embed as gemini_embed
         gemini_model = str(cfg["embed_model"])
         gemini_api_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
@@ -392,6 +425,11 @@ def build_index(draft_root: Path, verbose: bool = False) -> int:
             elif verbose:
                 log.info(f"  Added {end}/{len(chunks)} chunks...")
     else:
+        from sentence_transformers import SentenceTransformer
+        from transformers.utils import logging as transformers_logging
+        from huggingface_hub import logging as hf_logging
+        transformers_logging.set_verbosity_error()
+        hf_logging.set_verbosity_error()
         with contextlib.redirect_stdout(io.StringIO()):
             model = SentenceTransformer(
                 str(cfg["embed_model"]),

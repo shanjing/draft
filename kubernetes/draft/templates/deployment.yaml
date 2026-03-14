@@ -56,6 +56,11 @@ spec:
             - name: hf-model-cache
               mountPath: {{ printf "%s/.cache/huggingface" .Values.draftHome }}
             {{- end }}
+            {{- if .Values.onnxModels.hostPath }}
+            - name: onnx-models
+              mountPath: /app/onnx_models
+              readOnly: true
+            {{- end }}
             {{- if .Values.sourcesConfig }}
             - name: sources-config
               mountPath: {{ printf "%s/sources.yaml" .Values.draftHome }}
@@ -151,6 +156,12 @@ spec:
               subPath: sources.yaml
               readOnly: true
             {{- end }}
+            {{- if .Values.onnxModels.hostPath }}
+            # ONNX model files for air-gapped embedding/reranking (no PyTorch needed)
+            - name: onnx-models
+              mountPath: /app/onnx_models
+              readOnly: true
+            {{- end }}
             {{- range .Values.docSources }}
             # Host-path mount for document source: {{ .name }}
             - name: docsrc-{{ .name | replace "_" "-" | lower }}
@@ -181,6 +192,12 @@ spec:
           hostPath:
             path: {{ .Values.hfCache.hostPath }}
             type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.onnxModels.hostPath }}
+        - name: onnx-models
+          hostPath:
+            path: {{ .Values.onnxModels.hostPath }}
+            type: Directory
         {{- end }}
         {{- if .Values.sourcesConfig }}
         - name: sources-config

@@ -130,6 +130,31 @@ docker run -p 8058:8058 \
 
 Or use `./setup.sh` option 8.
 
+#### ONNX image (no PyTorch, ~724 MB)
+
+Build the ONNX-only image and run with model files mounted from the host. No PyTorch or sentence-transformers inside the container.
+
+```bash
+# Build ONNX image
+docker build --build-arg ONNX_ONLY=1 -t draft:onnx .
+
+# Export models once (requires PyTorch on dev machine, output stays on host)
+.venv/bin/python scripts/export_onnx.py --output-dir /path/to/onnx_models
+
+# Create env override (one line, no secrets)
+echo 'DRAFT_EMBED_PROVIDER=onnx' > .env.docker
+
+# Run
+docker run --rm \
+  --env-file .env.docker \
+  -v ~/.draft:/home/app/.draft \
+  -v $(pwd)/.env:/app/.env:ro \
+  -v /path/to/onnx_models:/app/onnx_models:ro \
+  draft:onnx
+```
+
+Full guide: [docs/onnx_export.md](docs/onnx_export.md)
+
 ---
 
 ## MCP Server
@@ -245,3 +270,4 @@ See [MCP operations](docs/MCP_operations.md) for token management, index rebuild
 | [Observability design](docs/observability_design.md) | OTel metrics and traces (RAG + MCP), GenAI semconv, console vs OTLP |
 | [OTel walkthrough](docs/OTel_walkthrough.md) | Data-flow walkthrough, metrics log file and env vars |
 | [Testing suites](docs/testing_suites.md) | pytest, pipeline test, OTel tests, MCP integration (test_mcp.py), curl integration |
+| [ONNX export](docs/onnx_export.md) | Export models to ONNX, Docker + K8s deployment without PyTorch |

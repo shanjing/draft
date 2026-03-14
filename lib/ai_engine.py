@@ -115,6 +115,19 @@ def _get_cross_encoder_model() -> str:
     """Cross-encoder model name; DRAFT_CROSS_ENCODER_MODEL env overrides default. Strips quotes for Docker --env-file."""
     return _env_strip("DRAFT_CROSS_ENCODER_MODEL", "") or CROSS_ENCODER_MODEL
 
+
+def _get_reranker_model_name() -> str:
+    """Display name for the active reranker.
+
+    When ONNX rerank is active, DRAFT_CROSS_ENCODER_MODEL reflects the HF provider
+    config and may not match the exported ONNX model. Use DRAFT_ONNX_RERANK_MODEL
+    for the display name when set; fall back to the module-level default so the
+    name shown always matches what's actually running.
+    """
+    if _use_onnx_rerank():
+        return _env_strip("DRAFT_ONNX_RERANK_MODEL", "") or CROSS_ENCODER_MODEL
+    return _get_cross_encoder_model()
+
 _CROSS_ENCODER_CACHE: dict[str, object] = {}
 
 
@@ -188,19 +201,35 @@ def _get_cross_encoder(model_name: str | None = None):
     return _CROSS_ENCODER_CACHE[name]
 
 
+def _use_onnx_rerank() -> bool:
+    """True if ONNX reranking is configured (DRAFT_EMBED_PROVIDER=onnx and DRAFT_ONNX_RERANK_DIR set)."""
+    provider = _env_strip("DRAFT_EMBED_PROVIDER").lower()
+    return provider == "onnx" and bool(_env_strip("DRAFT_ONNX_RERANK_DIR"))
+
+
 def rerank(query: str, chunks: list[dict], top_n: int = RERANK_TOP_N) -> list[dict]:
     """
-    Rerank chunks using Hugging Face cross-encoder only. Returns top_n chunks with "score" attached.
+    Rerank chunks using cross-encoder. Uses ONNX when configured, otherwise HF CrossEncoder.
+    Returns top_n chunks with "score" attached.
     """
     if not chunks:
         return []
-    model_name = _get_cross_encoder_model()
-    # HF CrossEncoder: strip :tag from model name if present
-    hf_model = model_name.split(":")[0] if ":" in model_name else model_name
-    model = _get_cross_encoder(hf_model)
-    pairs = [(query, c.get("text", "") or "") for c in chunks]
-    scores = model.predict(pairs)
-    indexed = list(zip(scores.tolist(), chunks))
+
+    passages = [c.get("text", "") or "" for c in chunks]
+
+    if _use_onnx_rerank():
+        from lib.onnx_rerank import predict as onnx_predict
+        onnx_rerank_dir = _env_strip("DRAFT_ONNX_RERANK_DIR")
+        scores_list = onnx_predict(query, passages, onnx_rerank_dir)
+    else:
+        model_name = _get_cross_encoder_model()
+        # HF CrossEncoder: strip :tag from model name if present
+        hf_model = model_name.split(":")[0] if ":" in model_name else model_name
+        model = _get_cross_encoder(hf_model)
+        pairs = [(query, p) for p in passages]
+        scores_list = model.predict(pairs).tolist()
+
+    indexed = list(zip(scores_list, chunks))
     indexed.sort(key=lambda x: x[0], reverse=True)
     out = []
     for score, c in indexed[:top_n]:
@@ -260,8 +289,24 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
             include=["metadatas", "documents"],
         )
 
+    def _query_with_onnx():
+        from lib.onnx_embed import embed as onnx_embed
+        onnx_model_dir = _env_strip("DRAFT_ONNX_EMBED_DIR")
+        if not onnx_model_dir:
+            raise RuntimeError("DRAFT_ONNX_EMBED_DIR must be set to use ONNX embeddings")
+        q_embs = onnx_embed([query], onnx_model_dir)
+        if not q_embs:
+            return {"metadatas": [[]], "documents": [[]]}
+        return coll.query(
+            query_embeddings=[q_embs[0]],
+            n_results=min(top_k, 20),
+            include=["metadatas", "documents"],
+        )
+
     try:
-        if embed_provider == "ollama":
+        if embed_provider == "onnx":
+            result = _query_with_onnx()
+        elif embed_provider == "ollama":
             result = _query_with_ollama(embed_model)
         elif embed_provider == "gemini":
             result = _query_with_gemini(embed_model)
@@ -364,9 +409,8 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt
 
     coll = _get_collection(draft_root)
     meta = (getattr(coll, "metadata", None) or {}) if coll else {}
-    # Display: prefer .env (configured) over collection metadata so UI matches config
-    embed_model_display = _env_strip("DRAFT_EMBED_MODEL") or meta.get("embed_model") or EMBED_MODEL
-    embed_model = meta.get("embed_model") or EMBED_MODEL  # retrieval uses index-built model
+    # .env is source of truth; fall back to collection metadata, then module default.
+    embed_model = _env_strip("DRAFT_EMBED_MODEL") or meta.get("embed_model") or EMBED_MODEL
 
     tracer = get_tracer("draft", "1.0.0")
     with tracer.start_as_current_span("rag.ask") as _root_span:
@@ -384,7 +428,7 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt
             log.info(f"cross_encoder_model: {_get_cross_encoder_model()}")
             log.info(f"retrieval: {len(chunks)} chunks (top_k={RETRIEVAL_TOP_K})")
 
-        reranker_model = _get_cross_encoder_model()
+        reranker_model = _get_reranker_model_name()
         t_rerank = time.perf_counter()
         # OTel child span: rerank (cross-encoder). Attributes: reranker_model, chunk_count.
         with tracer.start_as_current_span("rag.rerank") as rerank_span:
@@ -435,8 +479,8 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt
 
         # Emit model info after retrieval+rerank, before streaming (display from .env/config)
         yield ("models", {
-            "embed_model": embed_model_display,
-            "cross_encoder_model": _get_cross_encoder_model(),
+            "embed_model": embed_model,
+            "cross_encoder_model": _get_reranker_model_name(),
             "llm_model": llm_model,
         })
 
