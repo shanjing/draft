@@ -19,8 +19,14 @@ def mean_pooling(model_output, attention_mask):
 @click.command(context_settings=dict(help_option_names=['-h', '--help']))
 @click.option('-s', '--sentence', 'sentences', multiple=True, required=True, 
               help='Sentence to encode. Use multiple times for batch processing.')
-def inspect_embeddings(sentences):
-    """Utility to examine embeddings using all-MiniLM-L6-v2."""
+@click.option(
+    "--model",
+    default=lambda: os.getenv("DRAFT_EMBED_MODEL", "nomic-ai/nomic-embed-text-v1.5"),
+    show_default="DRAFT_EMBED_MODEL or nomic-ai/nomic-embed-text-v1.5",
+    help="Embedding model id to load.",
+)
+def inspect_embeddings(sentences, model):
+    """Utility to examine embeddings for the configured model."""
     
     # Retrieve the token with a null fallback
     hf_token = os.getenv("HF_API_KEY")
@@ -29,7 +35,7 @@ def inspect_embeddings(sentences):
     click.secho(f"🚀 Status: {auth_status}", fg='blue')
     click.secho(f"📦 Loading model for {len(sentences)} sentences...", fg='cyan')
 
-    model_id = 'sentence-transformers/all-MiniLM-L6-v2'
+    model_id = model
     
     # Load with optional token
     tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)

@@ -16,10 +16,11 @@ There are limitations to this MVP RAG system:
 3. too many to mention...
 """
 import os
+import re
 import time
 from pathlib import Path
 
-from lib.ingest import COLLECTION_NAME, EMBED_MODEL, TRUST_REMOTE_CODE  # noqa: F401
+from lib.ingest import COLLECTION_NAME, DEFAULT_EMBED_MODEL, EMBED_MODEL, TRUST_REMOTE_CODE  # noqa: F401
 from lib.log import get_logger
 from lib.manifest import parse_sources_yaml
 from lib.metrics import (
@@ -106,8 +107,10 @@ def llm_ready(draft_root: Path) -> bool:
 
 
 # Vector search returns top RETRIEVAL_TOP_K; cross-encoder reranks to RERANK_TOP_N for LLM.
-RETRIEVAL_TOP_K = 10
-RERANK_TOP_N = 3
+RETRIEVAL_TOP_K = int(_env_strip("DRAFT_RETRIEVAL_TOP_K", "24") or "24")
+RERANK_TOP_N = int(_env_strip("DRAFT_RERANK_TOP_N", "5") or "5")
+LEXICAL_TOP_K = int(_env_strip("DRAFT_LEXICAL_TOP_K", "8") or "8")
+RRF_K = int(_env_strip("DRAFT_RRF_K", "60") or "60")
 CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 
@@ -257,12 +260,14 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
     embed_model = env_model or meta.get("embed_model") or EMBED_MODEL
     trust_remote_code = _coerce_bool(meta.get("trust_remote_code"), TRUST_REMOTE_CODE)
 
+    n_results = max(1, min(max(top_k, RETRIEVAL_TOP_K), 60))
+
     def _query_with_hf(model_name: str, trust: bool):
         model = _get_embedding_model(model_name, trust)
         q_emb = model.encode([query], show_progress_bar=False)
         return coll.query(
             query_embeddings=q_emb.tolist(),
-            n_results=min(top_k, 20),
+            n_results=n_results,
             include=["metadatas", "documents"],
         )
 
@@ -273,7 +278,7 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
             return {"metadatas": [[]], "documents": [[]]}
         return coll.query(
             query_embeddings=[q_embs[0]],
-            n_results=min(top_k, 20),
+            n_results=n_results,
             include=["metadatas", "documents"],
         )
 
@@ -285,7 +290,7 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
             return {"metadatas": [[]], "documents": [[]]}
         return coll.query(
             query_embeddings=[q_embs[0]],
-            n_results=min(top_k, 20),
+            n_results=n_results,
             include=["metadatas", "documents"],
         )
 
@@ -299,7 +304,7 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
             return {"metadatas": [[]], "documents": [[]]}
         return coll.query(
             query_embeddings=[q_embs[0]],
-            n_results=min(top_k, 20),
+            n_results=n_results,
             include=["metadatas", "documents"],
         )
 
@@ -315,8 +320,8 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
     except Exception as e:
         msg = str(e)
         # Backward-compat: old collections may be quick-built but missing metadata.
-        if "Embedding dimension" in msg and "collection dimensionality" in msg and embed_model != "sentence-transformers/all-MiniLM-L6-v2":
-            result = _query_with_hf("sentence-transformers/all-MiniLM-L6-v2", False)
+        if "Embedding dimension" in msg and "collection dimensionality" in msg and embed_model != DEFAULT_EMBED_MODEL:
+            result = _query_with_hf(DEFAULT_EMBED_MODEL, False)
         else:
             raise
     out = []
@@ -339,6 +344,140 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
             except (TypeError, ValueError):
                 pass
         out.append(item)
+    lexical = _lexical_retrieve(draft_root, query, top_k=LEXICAL_TOP_K)
+    fused = _fuse_retrieval_results(out, lexical, top_k=top_k)
+    return _dedupe_and_diversify(fused, limit=top_k)
+
+
+def _normalize_text(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def _chunk_identity(c: dict) -> str:
+    repo = c.get("repo", "") or ""
+    path = c.get("path", "") or ""
+    heading = c.get("heading", "") or ""
+    sl = c.get("start_line")
+    el = c.get("end_line")
+    if sl is not None and el is not None:
+        return f"{repo}|{path}|{heading}|{sl}|{el}"
+    text_sig = _normalize_text(c.get("text", ""))[:240]
+    return f"{repo}|{path}|{heading}|{text_sig}"
+
+
+def _tokenize_query_terms(query: str) -> list[str]:
+    # Keep this lightweight and deterministic; we only need enough signal for lexical snippets.
+    terms = re.findall(r"[a-zA-Z0-9_.:/-]{3,}", query.lower())
+    stop = {
+        "the", "and", "for", "with", "that", "from", "into", "this", "does",
+        "how", "what", "when", "where", "which", "over", "about", "covering",
+    }
+    return [t for t in terms if t not in stop]
+
+
+def _extract_lexical_window(content: str, query: str, max_chars: int = 1800) -> str:
+    if not content:
+        return ""
+    terms = _tokenize_query_terms(query)
+    if not terms:
+        return content[:max_chars]
+    paras = [p.strip() for p in re.split(r"\n\s*\n", content) if p.strip()]
+    if not paras:
+        return content[:max_chars]
+    best = paras[0]
+    best_score = -1
+    for p in paras:
+        lp = p.lower()
+        score = 0
+        for t in terms:
+            if t in lp:
+                score += 1
+        if score > best_score:
+            best = p
+            best_score = score
+    if len(best) <= max_chars:
+        return best
+    return best[:max_chars]
+
+
+def _lexical_retrieve(draft_root: Path, query: str, top_k: int) -> list[dict]:
+    # Optional lexical stage (Whoosh) to improve recall for exact config/symbol queries.
+    try:
+        from whoosh.index import open_dir, exists_in
+        from whoosh.qparser import QueryParser, OrGroup
+    except Exception:
+        return []
+    idx_dir = draft_root / ".search_index"
+    if not exists_in(str(idx_dir)):
+        return []
+    q = (query or "").strip()
+    if not q:
+        return []
+    try:
+        ix = open_dir(str(idx_dir))
+        parser = QueryParser("content", schema=ix.schema, group=OrGroup.factory(0.9))
+        parsed = parser.parse(q)
+    except Exception:
+        return []
+
+    out: list[dict] = []
+    with ix.searcher() as searcher:
+        hits = searcher.search(parsed, limit=max(top_k, 1))
+        for hit in hits:
+            content = hit.get("content") or ""
+            out.append(
+                {
+                    "repo": hit.get("repo", "") or "",
+                    "path": hit.get("path", "") or "",
+                    "heading": "",
+                    "text": _extract_lexical_window(content, q),
+                    "lexical_score": float(getattr(hit, "score", 0.0) or 0.0),
+                }
+            )
+    return out
+
+
+def _fuse_retrieval_results(semantic: list[dict], lexical: list[dict], top_k: int) -> list[dict]:
+    if not lexical:
+        return semantic[:top_k]
+    merged: dict[str, dict] = {}
+    rrf_scores: dict[str, float] = {}
+
+    def _add(items: list[dict], weight: float) -> None:
+        for rank, c in enumerate(items, 1):
+            key = _chunk_identity(c)
+            if key not in merged:
+                merged[key] = dict(c)
+            elif len(c.get("text", "")) > len(merged[key].get("text", "")):
+                merged[key]["text"] = c.get("text", "")
+            rrf_scores[key] = rrf_scores.get(key, 0.0) + weight * (1.0 / (RRF_K + rank))
+
+    _add(semantic, 1.0)
+    _add(lexical, 0.9)
+    ranked = sorted(merged.items(), key=lambda kv: rrf_scores.get(kv[0], 0.0), reverse=True)
+    return [item for _, item in ranked[: max(top_k * 2, top_k)]]
+
+
+def _dedupe_and_diversify(chunks: list[dict], limit: int) -> list[dict]:
+    if not chunks:
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    per_path: dict[tuple[str, str], int] = {}
+    for c in chunks:
+        key = _chunk_identity(c)
+        if key in seen:
+            continue
+        path_key = (c.get("repo", "") or "", c.get("path", "") or "")
+        count = per_path.get(path_key, 0)
+        # Keep context diverse and avoid spending top-k on near-duplicate mirrors of one file.
+        if count >= 2:
+            continue
+        seen.add(key)
+        per_path[path_key] = count + 1
+        out.append(c)
+        if len(out) >= limit:
+            break
     return out
 
 
