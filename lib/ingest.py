@@ -50,7 +50,7 @@ EXCLUDE_DIRS = (
 )
 
 COLLECTION_NAME = "draft_docs"
-DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 
 # Backward-compat for modules that still import these names from ingest.
 # Runtime code should prefer DRAFT_EMBED_MODEL and collection metadata.
@@ -258,7 +258,7 @@ def build_index(draft_root: Path, verbose: bool = False) -> int:
     env_embed = os.environ.get("DRAFT_EMBED_MODEL", "").strip().strip("'\"")
     if not env_embed:
         raise ValueError(
-            "DRAFT_EMBED_MODEL is not set. Set it in .env (e.g. DRAFT_EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2) or run setup.sh step 2."
+            "DRAFT_EMBED_MODEL is not set. Set it in .env (e.g. DRAFT_EMBED_MODEL=nomic-ai/nomic-embed-text-v1.5) or run setup.sh step 2."
         )
     env_embed_provider = (os.environ.get("DRAFT_EMBED_PROVIDER", "") or "").strip().lower()
     cfg = dict(INDEX_DEFAULTS)

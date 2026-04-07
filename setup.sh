@@ -512,7 +512,7 @@ verify_openai_key() {
 }
 
 # Default embedding and cross-encoder models (Hugging Face, run locally)
-DEFAULT_EMBED_MODEL="sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_EMBED_MODEL="nomic-ai/nomic-embed-text-v1.5"
 DEFAULT_CROSS_ENCODER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # Read a key from .env (strip quotes). Usage: env_val "DRAFT_EMBED_MODEL" "default"
@@ -533,14 +533,14 @@ env_val() {
 # One-liner feature for known embed models
 embed_model_feature() {
   case "$1" in
+    nomic-embed-text-v1.5|nomic-ai/nomic-embed-text-v1.5)
+      printf "Higher quality, longer context"
+      ;;
     sentence-transformers/all-MiniLM-L6-v2)
       printf "Fast, small, good for most use cases"
       ;;
     BAAI/bge-small-en-v1.5)
       printf "Small, strong quality for English"
-      ;;
-    nomic-ai/nomic-embed-text-v1.5)
-      printf "Higher quality, longer context"
       ;;
     mixedbread-ai/mxbai-embed-large-v1)
       printf "Strong MTEB performance, 1024 dims"
@@ -576,12 +576,13 @@ do_config_embed_flow() {
   echo ""
   printf "  N) No change (use current model) [default]\n"
   printf "  ${D}Suggested Hugging Face models: ${Y}[all HF models will be downloaded and run locally for privacy]${N}\n"
-  printf "  ${D}16GB laptop (no GPU): prefer 1 or nomic-ai/nomic-embed-text-v1.5.${N}\n"
-  printf "  1) sentence-transformers/all-MiniLM-L6-v2 — %s\n" "$(embed_model_feature "sentence-transformers/all-MiniLM-L6-v2")"
-  printf "  2) BAAI/bge-small-en-v1.5 — %s\n" "$(embed_model_feature "BAAI/bge-small-en-v1.5")"
-  printf "  3) mixedbread-ai/mxbai-embed-large-v1 — %s\n" "$(embed_model_feature "mixedbread-ai/mxbai-embed-large-v1")"
+  printf "  ${D}16GB laptop (no GPU): prefer 1 (nomic) or 2 (MiniLM).${N}\n"
+  printf "  1) nomic-ai/nomic-embed-text-v1.5 — %s ${Y}[default]${N}\n" "$(embed_model_feature "nomic-ai/nomic-embed-text-v1.5")"
+  printf "  2) sentence-transformers/all-MiniLM-L6-v2 — %s\n" "$(embed_model_feature "sentence-transformers/all-MiniLM-L6-v2")"
+  printf "  3) BAAI/bge-small-en-v1.5 — %s\n" "$(embed_model_feature "BAAI/bge-small-en-v1.5")"
+  printf "  4) mixedbread-ai/mxbai-embed-large-v1 — %s\n" "$(embed_model_feature "mixedbread-ai/mxbai-embed-large-v1")"
   printf "  ${D}Gemini (cloud, requires GEMINI_API_KEY in .env):${N}\n"
-  printf "  4) gemini-embedding-2-preview — %s\n" "$(embed_model_feature "gemini-embedding-2-preview")"
+  printf "  5) gemini-embedding-2-preview — %s\n" "$(embed_model_feature "gemini-embedding-2-preview")"
   echo ""
   OLLAMA_EMBED_AVAILABLE=()
   if command -v ollama >/dev/null 2>&1; then
@@ -595,14 +596,14 @@ do_config_embed_flow() {
   fi
   if [ ${#OLLAMA_EMBED_AVAILABLE[@]} -gt 0 ]; then
     printf "  ${D}Local Ollama models:${N}\n"
-    local i=5
+    local i=6
     for m in "${OLLAMA_EMBED_AVAILABLE[@]}"; do
       printf "  %s) %s (Ollama) — %s\n" "$i" "$m" "$(embed_model_feature "$m")"
       i=$((i + 1))
     done
     echo ""
   fi
-  printf "  Enter N (default), 1–4, a number for Ollama, or type a Hugging Face model (e.g. org/model):\n"
+  printf "  Enter N (default), 1–5, a number for Ollama, or type a Hugging Face model (e.g. org/model):\n"
   local choice
   read -r -p "Choice [N]: " choice
   choice="$(printf '%s' "$choice" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -614,18 +615,20 @@ do_config_embed_flow() {
     echo ""
     return
   elif [ "$choice" = "1" ]; then
-    embed_model="sentence-transformers/all-MiniLM-L6-v2"
+    embed_model="nomic-ai/nomic-embed-text-v1.5"
   elif [ "$choice" = "2" ]; then
-    embed_model="BAAI/bge-small-en-v1.5"
+    embed_model="sentence-transformers/all-MiniLM-L6-v2"
   elif [ "$choice" = "3" ]; then
-    embed_model="mixedbread-ai/mxbai-embed-large-v1"
+    embed_model="BAAI/bge-small-en-v1.5"
   elif [ "$choice" = "4" ]; then
+    embed_model="mixedbread-ai/mxbai-embed-large-v1"
+  elif [ "$choice" = "5" ]; then
     embed_model="gemini-embedding-2-preview"
     embed_provider="gemini"
   elif printf '%s' "$choice" | grep -q '/'; then
     embed_model="$choice"
   else
-    local idx=$((choice - 5))
+    local idx=$((choice - 6))
     if [ "$idx" -ge 0 ] 2>/dev/null && [ "$idx" -lt ${#OLLAMA_EMBED_AVAILABLE[@]} ]; then
       embed_model="${OLLAMA_EMBED_AVAILABLE[$idx]}"
       embed_provider="ollama"
