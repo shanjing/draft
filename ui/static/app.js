@@ -1767,7 +1767,7 @@
         .then(function () {
           if (reindexBtn) {
             reindexBtn.disabled = false;
-            reindexBtn.textContent = 'Rebuild';
+            reindexBtn.textContent = 'Rebuild RAG index';
           }
           if (typeof endExecution === 'function') endExecution();
         });
