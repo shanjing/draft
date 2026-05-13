@@ -128,3 +128,29 @@ class TestAIEngine:
         assert len(events) >= 1
         types = [e[0] for e in events]
         assert "models" in types
+
+    def test_is_code_query_detects_code_intent(self):
+        from lib.ai_engine import _is_code_query
+        assert _is_code_query("Where is this function defined in .py files?") is True
+        assert _is_code_query("Explain this bash script compile flags") is True
+
+    def test_is_code_query_skips_general_doc_query(self):
+        from lib.ai_engine import _is_code_query
+        assert _is_code_query("What is the product architecture overview?") is False
+
+    def test_is_code_path_detects_supported_extensions(self):
+        from lib.ai_engine import _is_code_path
+        assert _is_code_path("lib/ai_engine.py") is True
+        assert _is_code_path("scripts/build.sh") is True
+        assert _is_code_path("src/main.cpp") is True
+        assert _is_code_path("docs/engineering.md") is False
+
+    def test_fuse_retrieval_results_accepts_code_lexical(self):
+        from lib.ai_engine import _fuse_retrieval_results
+        semantic = [{"repo": "a", "path": "doc.md", "heading": "", "text": "semantic"}]
+        lexical = []
+        code_lexical = [{"repo": "a", "path": "main.py", "heading": "", "text": "def hello(): pass"}]
+        out = _fuse_retrieval_results(semantic, lexical, top_k=3, code_lexical=code_lexical)
+        paths = {c.get("path") for c in out}
+        assert "doc.md" in paths
+        assert "main.py" in paths

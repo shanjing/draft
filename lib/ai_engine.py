@@ -110,7 +110,9 @@ def llm_ready(draft_root: Path) -> bool:
 RETRIEVAL_TOP_K = int(_env_strip("DRAFT_RETRIEVAL_TOP_K", "24") or "24")
 RERANK_TOP_N = int(_env_strip("DRAFT_RERANK_TOP_N", "5") or "5")
 LEXICAL_TOP_K = int(_env_strip("DRAFT_LEXICAL_TOP_K", "8") or "8")
+CODE_LEXICAL_TOP_K = int(_env_strip("DRAFT_CODE_LEXICAL_TOP_K", "5") or "5")
 RRF_K = int(_env_strip("DRAFT_RRF_K", "60") or "60")
+CODE_LEXICAL_WEIGHT = float(_env_strip("DRAFT_CODE_LEXICAL_WEIGHT", "1.1") or "1.1")
 CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 
@@ -344,8 +346,10 @@ def retrieve(draft_root: Path, query: str, top_k: int = RETRIEVAL_TOP_K) -> list
             except (TypeError, ValueError):
                 pass
         out.append(item)
-    lexical = _lexical_retrieve(draft_root, query, top_k=LEXICAL_TOP_K)
-    fused = _fuse_retrieval_results(out, lexical, top_k=top_k)
+    code_query = _is_code_query(query)
+    lexical = [] if code_query else _lexical_retrieve(draft_root, query, top_k=LEXICAL_TOP_K)
+    code_lexical = _code_lexical_retrieve(draft_root, query, top_k=CODE_LEXICAL_TOP_K) if code_query else []
+    fused = _fuse_retrieval_results(out, lexical, top_k=top_k, code_lexical=code_lexical)
     return _dedupe_and_diversify(fused, limit=top_k)
 
 
@@ -373,6 +377,30 @@ def _tokenize_query_terms(query: str) -> list[str]:
         "how", "what", "when", "where", "which", "over", "about", "covering",
     }
     return [t for t in terms if t not in stop]
+
+
+def _is_code_query(query: str) -> bool:
+    q = (query or "").lower()
+    if not q:
+        return False
+    if re.search(r"\.(py|sh|bash|zsh|c|h|cc|cpp|cxx|hpp)\b", q):
+        return True
+    hints = {
+        "function", "method", "class", "line", "lines", "symbol", "file", "filepath",
+        "import", "def ", "return ", "stack trace", "compile", "script", "source code",
+    }
+    return any(h in q for h in hints)
+
+
+def _is_code_path(path: str) -> bool:
+    p = (path or "").lower()
+    return p.endswith((".py", ".sh", ".bash", ".zsh", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp"))
+
+
+def _query_path_hints(query: str) -> list[str]:
+    q = (query or "").lower()
+    hints = re.findall(r"[a-z0-9_./-]+\.(?:py|sh|bash|zsh|c|h|cc|cpp|cxx|hpp)", q)
+    return hints[:3]
 
 
 def _extract_lexical_window(content: str, query: str, max_chars: int = 1800) -> str:
@@ -437,8 +465,48 @@ def _lexical_retrieve(draft_root: Path, query: str, top_k: int) -> list[dict]:
     return out
 
 
-def _fuse_retrieval_results(semantic: list[dict], lexical: list[dict], top_k: int) -> list[dict]:
-    if not lexical:
+def _code_lexical_retrieve(draft_root: Path, query: str, top_k: int) -> list[dict]:
+    try:
+        from ui import search_index_code
+    except Exception:
+        return []
+    q = (query or "").strip()
+    if not q:
+        return []
+    try:
+        search_index_code.ensure_index(draft_root)
+        hits = search_index_code.search(
+            draft_root,
+            q,
+            limit=max(top_k, 1),
+            include_content=True,
+            path_hints=_query_path_hints(q),
+        )
+    except Exception:
+        return []
+    out: list[dict] = []
+    for hit in hits:
+        content = hit.get("content") or ""
+        out.append(
+            {
+                "repo": hit.get("repo", "") or "",
+                "path": hit.get("path", "") or "",
+                "heading": "",
+                "text": _extract_lexical_window(content, q),
+                "lexical_score": 0.0,
+            }
+        )
+    return out
+
+
+def _fuse_retrieval_results(
+    semantic: list[dict],
+    lexical: list[dict],
+    top_k: int,
+    code_lexical: list[dict] | None = None,
+) -> list[dict]:
+    code_lexical = code_lexical or []
+    if not lexical and not code_lexical:
         return semantic[:top_k]
     merged: dict[str, dict] = {}
     rrf_scores: dict[str, float] = {}
@@ -454,6 +522,7 @@ def _fuse_retrieval_results(semantic: list[dict], lexical: list[dict], top_k: in
 
     _add(semantic, 1.0)
     _add(lexical, 0.9)
+    _add(code_lexical, CODE_LEXICAL_WEIGHT)
     ranked = sorted(merged.items(), key=lambda kv: rrf_scores.get(kv[0], 0.0), reverse=True)
     return [item for _, item in ranked[: max(top_k * 2, top_k)]]
 
@@ -568,12 +637,31 @@ def ask_stream(draft_root: Path, query: str, *, debug: bool = False, show_prompt
             log.info(f"retrieval: {len(chunks)} chunks (top_k={RETRIEVAL_TOP_K})")
 
         reranker_model = _get_reranker_model_name()
+        code_query = _is_code_query(query)
+        code_priority: list[dict] = []
+        if code_query:
+            path_hints = _query_path_hints(query)
+            code_candidates = [c for c in chunks if _is_code_path(c.get("path", ""))]
+            if path_hints:
+                hinted = [c for c in code_candidates if any(h in (c.get("path", "").lower()) for h in path_hints)]
+                rest = [c for c in code_candidates if c not in hinted]
+                code_priority = (hinted + rest)[:2]
+            else:
+                code_priority = code_candidates[:2]
         t_rerank = time.perf_counter()
         # OTel child span: rerank (cross-encoder). Attributes: reranker_model, chunk_count.
         with tracer.start_as_current_span("rag.rerank") as rerank_span:
             rerank_span.set_attribute("rag.reranker_model", reranker_model)
             rerank_span.set_attribute("rag.chunk_count", str(len(chunks)))
             chunks = rerank(query, chunks, top_n=RERANK_TOP_N)
+            if code_query and code_priority:
+                existing = {_chunk_identity(c) for c in chunks}
+                for c in reversed(code_priority):
+                    key = _chunk_identity(c)
+                    if key not in existing:
+                        chunks.insert(0, c)
+                        existing.add(key)
+                chunks = chunks[:RERANK_TOP_N]
         record_rerank(time.perf_counter() - t_rerank, reranker_model)
 
         # Log the rerank scores for debugging
